@@ -25,3 +25,6 @@ regress/logs/
 tags
 tmux
 tmux.1.*
+/build-output/
+/.rake-configure-stamp
+*.log
