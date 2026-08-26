@@ -116,6 +116,12 @@ struct winlink;
  * cells just outside its own cell.
  */
 #define LAYOUT_BORDER 1
+
+/*
+ * Two adjacent panes each draw their own border, so the gap between them is
+ * two cells, not the one cell it is when a border is shared.
+ */
+#define LAYOUT_SEPARATOR (2 * LAYOUT_BORDER)
 #define PANE_MAXIMUM 10000
 
 /* Minimum and maximum window size. */

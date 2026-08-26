@@ -330,7 +330,7 @@ layout_fix_offsets1(struct layout_cell *lc)
 			lcchild->g.yoff = lc->g.yoff;
 			if (lcchild->type != LAYOUT_WINDOWPANE)
 				layout_fix_offsets1(lcchild);
-			xoff += lcchild->g.sx + 1;
+			xoff += lcchild->g.sx + LAYOUT_SEPARATOR;
 		}
 	} else {
 		yoff = lc->g.yoff;
@@ -342,7 +342,7 @@ layout_fix_offsets1(struct layout_cell *lc)
 			lcchild->g.yoff = yoff;
 			if (lcchild->type != LAYOUT_WINDOWPANE)
 				layout_fix_offsets1(lcchild);
-			yoff += lcchild->g.sy + 1;
+			yoff += lcchild->g.sy + LAYOUT_SEPARATOR;
 		}
 	}
 }
@@ -456,6 +456,10 @@ layout_fix_panes(struct window *w, struct window_pane *skip)
 		}
 
 		window_pane_resize(wp, sx, sy);
+
+		log_debug("%s: %%%u cell [%d,%d %ux%u] -> pane [%d,%d %ux%u]",
+		    __func__, wp->id, lc->g.xoff, lc->g.yoff, lc->g.sx,
+		    lc->g.sy, wp->xoff, wp->yoff, wp->sx, wp->sy);
 
 		if (wp->xoff != old_xoff ||
 		    wp->yoff != old_yoff ||
@@ -696,9 +700,9 @@ layout_destroy_cell(struct window *w, struct layout_cell *lc,
 	lcother = layout_cell_get_neighbour(lc);
 	if (lcother != NULL) {
 		if (lcparent->type == LAYOUT_LEFTRIGHT)
-			change = lc->g.sx + 1;
+			change = lc->g.sx + LAYOUT_SEPARATOR;
 		else
-			change = lc->g.sy + 1;
+			change = lc->g.sy + LAYOUT_SEPARATOR;
 		layout_resize_adjust(w, lcother, lcparent->type, change);
 	} else
 		layout_remove_tile(w, lcparent);
@@ -805,6 +809,9 @@ layout_resize(struct window *w, u_int sx, u_int sy)
 	}
 	if (ychange != 0)
 		layout_resize_adjust(w, lc, LAYOUT_TOPBOTTOM, ychange);
+
+	log_debug("%s: to %ux%u: xlimit=%d xchange=%d ylimit=%d ychange=%d",
+	    __func__, sx, sy, xlimit, xchange, ylimit, ychange);
 
 	/* Fix cell offsets. */
 	layout_fix_offsets(w);
@@ -1075,7 +1082,7 @@ layout_new_pane_size(struct window *w, u_int previous, struct layout_cell *lc,
 	 * Work out the minimum size of this cell and the new size
 	 * proportionate to the previous size.
 	 */
-	min = (PANE_MINIMUM + 1) * (count_left - 1);
+	min = (PANE_MINIMUM + LAYOUT_SEPARATOR) * (count_left - 1);
 	if (type == LAYOUT_LEFTRIGHT) {
 		if (lc->g.sx - available > min)
 			min = lc->g.sx - available;
@@ -1092,6 +1099,12 @@ layout_new_pane_size(struct window *w, u_int previous, struct layout_cell *lc,
 		new_size = max;
 	if (new_size < PANE_MINIMUM)
 		new_size = PANE_MINIMUM;
+
+	log_debug("%s: %s previous=%u size=%u count_left=%u size_left=%u "
+	    "available=%u min=%u max=%u -> new_size=%u", __func__,
+	    type == LAYOUT_LEFTRIGHT ? "LEFTRIGHT" : "TOPBOTTOM", previous,
+	    size, count_left, size_left, available, min, max, new_size);
+
 	return (new_size);
 }
 
@@ -1132,9 +1145,9 @@ layout_set_size_check(struct window *w, struct layout_cell *lc,
 					return (0);
 				available -= new_size;
 			} else {
-				if (new_size + 1 > available)
+				if (new_size + LAYOUT_SEPARATOR > available)
 					return (0);
-				available -= new_size + 1;
+				available -= new_size + LAYOUT_SEPARATOR;
 			}
 			if (!layout_set_size_check(w, lcchild, type, new_size))
 				return (0);
@@ -1175,7 +1188,7 @@ layout_resize_child_cells(struct window *w, struct layout_cell *lc)
 		else if (lc->type == LAYOUT_TOPBOTTOM)
 			prev += lcchild->g.sy;
 	}
-	prev += (count - 1);
+	prev += (count - 1) * LAYOUT_SEPARATOR;
 
 	/* And how much is available? */
 	available = 0;
@@ -1206,7 +1219,7 @@ layout_resize_child_cells(struct window *w, struct layout_cell *lc)
 		} else {
 			lcchild->g.sx = layout_new_pane_size(w, prev, lcchild,
 			    lc->type, lc->g.sx, count - idx, available);
-			available -= (lcchild->g.sx + 1);
+			available -= (lcchild->g.sx + LAYOUT_SEPARATOR);
 		}
 		if (lc->type == LAYOUT_LEFTRIGHT) {
 			lcchild->g.sy = lc->g.sy;
@@ -1214,7 +1227,7 @@ layout_resize_child_cells(struct window *w, struct layout_cell *lc)
 		} else {
 			lcchild->g.sy = layout_new_pane_size(w, prev, lcchild,
 			    lc->type, lc->g.sy, count - idx, available);
-			available -= (lcchild->g.sy + 1);
+			available -= (lcchild->g.sy + LAYOUT_SEPARATOR);
 		}
 		layout_resize_child_cells(w, lcchild);
 		idx++;
@@ -1269,7 +1282,7 @@ layout_split_check_space(struct window_pane *wp, struct layout_cell *lc,
 			minimum = PANE_MINIMUM * 2 + sb_style->width +
 			    sb_style->pad;
 		} else
-			minimum = PANE_MINIMUM * 2 + 1;
+			minimum = PANE_MINIMUM * 2 + LAYOUT_SEPARATOR;
 		if (sx < minimum)
 			return (0);
 		break;
@@ -1277,7 +1290,7 @@ layout_split_check_space(struct window_pane *wp, struct layout_cell *lc,
 		if (layout_add_horizontal_border(root, lc, status))
 			minimum = PANE_MINIMUM * 2 + 2;
 		else
-			minimum = PANE_MINIMUM * 2 + 1;
+			minimum = PANE_MINIMUM * 2 + LAYOUT_SEPARATOR;
 		if (sy < minimum)
 			return (0);
 		break;
@@ -1301,20 +1314,25 @@ layout_split_sizes(struct layout_cell *lc, int size, int before,
 	else
 		ss = sy;
 	if (size < 0)
-		s2 = ((ss + 1) / 2) - 1;
+		s2 = (ss - LAYOUT_SEPARATOR + 1) / 2;
 	else if (before)
-		s2 = ss - size - 1;
+		s2 = ss - size - LAYOUT_SEPARATOR;
 	else
 		s2 = size;
 	if (s2 < PANE_MINIMUM)
 		s2 = PANE_MINIMUM;
-	else if (s2 > ss - 2)
-		s2 = ss - 2;
-	s1 = ss - 1 - s2;
+	else if (s2 > ss - LAYOUT_SEPARATOR - PANE_MINIMUM)
+		s2 = ss - LAYOUT_SEPARATOR - PANE_MINIMUM;
+	s1 = ss - LAYOUT_SEPARATOR - s2;
 
 	*size1 = s1;
 	*size2 = s2;
 	*saved_size = ss;
+
+	log_debug("%s: %s cell %ux%u requested=%d before=%d: ss=%u "
+	    "separator=%d -> s1=%u s2=%u", __func__,
+	    type == LAYOUT_LEFTRIGHT ? "LEFTRIGHT" : "TOPBOTTOM", sx, sy, size,
+	    before, ss, LAYOUT_SEPARATOR, s1, s2);
 }
 
 /*
@@ -1405,7 +1423,7 @@ layout_split_pane(struct window_pane *wp, enum layout_type type, int size,
 
 		/* Create the new cell. */
 		lcnew = layout_create_cell(lc);
-		size = saved_size - 1 - new_size;
+		size = saved_size - LAYOUT_SEPARATOR - new_size;
 		if (lc->type == LAYOUT_LEFTRIGHT)
 			layout_set_size(lcnew, size, sy, 0, 0);
 		else if (lc->type == LAYOUT_TOPBOTTOM)
@@ -1443,10 +1461,12 @@ layout_split_pane(struct window_pane *wp, enum layout_type type, int size,
 	 */
 	if (!resize_first && type == LAYOUT_LEFTRIGHT) {
 		layout_set_size(lc1, size1, sy, xoff, yoff);
-		layout_set_size(lc2, size2, sy, xoff + lc1->g.sx + 1, yoff);
+		layout_set_size(lc2, size2, sy, xoff + lc1->g.sx + LAYOUT_SEPARATOR,
+		    yoff);
 	} else if (!resize_first && type == LAYOUT_TOPBOTTOM) {
 		layout_set_size(lc1, sx, size1, xoff, yoff);
-		layout_set_size(lc2, sx, size2, xoff, yoff + lc1->g.sy + 1);
+		layout_set_size(lc2, sx, size2, xoff,
+		    yoff + lc1->g.sy + LAYOUT_SEPARATOR);
 	}
 	if (full_size) {
 		if (!resize_first)
@@ -1538,9 +1558,9 @@ layout_spread_cell(struct window *w, struct layout_cell *parent)
 			size = parent->g.sy;
 	} else
 		return (0);
-	if (size < number - 1)
+	if (size < (number - 1) * LAYOUT_SEPARATOR)
 		return (0);
-	each = (size - (number - 1)) / number;
+	each = (size - (number - 1) * LAYOUT_SEPARATOR) / number;
 	if (each == 0)
 		return (0);
 
@@ -1548,7 +1568,7 @@ layout_spread_cell(struct window *w, struct layout_cell *parent)
 	 * Remaining space after assigning that which can be evenly
 	 * distributed.
 	 */
-	remainder = size - (number * (each + 1)) + 1;
+	remainder = size - (number * each) - (number - 1) * LAYOUT_SEPARATOR;
 
 	/*
 	 * This is where uneven space is handed out, so log the arithmetic: a
@@ -1943,9 +1963,9 @@ layout_remove_tile(struct window *w, struct layout_cell *lc)
 		 * neighbour.
 		 */
 		if (type == LAYOUT_TOPBOTTOM)
-			change = lc->g.sy + 1;
+			change = lc->g.sy + LAYOUT_SEPARATOR;
 		else
-			change = lc->g.sx + 1;
+			change = lc->g.sx + LAYOUT_SEPARATOR;
 		layout_resize_adjust(w, lcneighbour, type, change);
 	}
 
