@@ -90,6 +90,34 @@ layout_fit_window(struct window *w, struct layout_cell *lc)
 	window_resize(w, lc->g.sx + inset, lc->g.sy + inset, -1, -1);
 }
 
+/*
+ * The smallest window the current layout fits in: the root cell plus the
+ * border kept at the window edge, which is what layout_fit_window would have
+ * resized the window to. layout_resize refuses to shrink the cells below
+ * their minimum, so without this a window can end up smaller than its own
+ * layout and the panes on the far side are left with their border, or
+ * themselves, outside it.
+ *
+ * A floating root cell is not the tiled area and is not resized with the
+ * window, so it imposes no minimum beyond WINDOW_MINIMUM.
+ */
+void
+layout_minimum_window_size(struct window *w, u_int *sx, u_int *sy)
+{
+	struct layout_cell	*lc = w->layout_root;
+	u_int			 inset = 2 * LAYOUT_BORDER;
+
+	if (lc == NULL ||
+	    (lc->type == LAYOUT_WINDOWPANE && (lc->flags & LAYOUT_CELL_FLOATING))) {
+		*sx = WINDOW_MINIMUM;
+		*sy = WINDOW_MINIMUM;
+		return;
+	}
+
+	*sx = lc->g.sx + inset;
+	*sy = lc->g.sy + inset;
+}
+
 /* Create a new layout cell. */
 struct layout_cell *
 layout_create_cell(struct layout_cell *lcparent)

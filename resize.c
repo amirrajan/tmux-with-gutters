@@ -44,6 +44,7 @@ resize_window(struct window *w, u_int sx, u_int sy, int xpixel, int ypixel)
 {
 	struct window_pane	*zwp;
 	u_int			 old_sx = w->sx, old_sy = w->sy;
+	u_int			 minsx, minsy;
 
 	/* Check size limits. */
 	if (sx < WINDOW_MINIMUM)
@@ -63,11 +64,15 @@ resize_window(struct window *w, u_int sx, u_int sy, int xpixel, int ypixel)
 	/* Resize the layout first. */
 	layout_resize(w, sx, sy);
 
-	/* Resize the window, it can be no smaller than the layout. */
-	if (sx < w->layout_root->g.sx)
-		sx = w->layout_root->g.sx;
-	if (sy < w->layout_root->g.sy)
-		sy = w->layout_root->g.sy;
+	/*
+	 * Resize the window, it can be no smaller than the layout plus the
+	 * border every pane keeps at the window edge.
+	 */
+	layout_minimum_window_size(w, &minsx, &minsy);
+	if (sx < minsx)
+		sx = minsx;
+	if (sy < minsy)
+		sy = minsy;
 	window_resize(w, sx, sy, xpixel, ypixel);
 	log_debug("%s: @%u resized to %ux%u; layout %ux%u", __func__, w->id,
 	    sx, sy, w->layout_root->g.sx, w->layout_root->g.sy);
