@@ -238,10 +238,21 @@ class TmuxScene
 
   # Pane geometry as a string, one line per pane, in list-panes order:
   # "index left top width height".
+  # Only the panes that are on screen. A zoomed window still lists the panes it
+  # is hiding, with the geometry they had before the zoom, and they are not
+  # drawn, so comparing them against a scene would always fail.
   def geometry
-    inner('list-panes', '-F',
-          '#{pane_index} #{pane_left} #{pane_top} ' \
-          '#{pane_width} #{pane_height}')
+    rows = inner('list-panes', '-F',
+                 '#{pane_index} #{pane_left} #{pane_top} ' \
+                 '#{pane_width} #{pane_height} ' \
+                 '#{window_zoomed_flag}#{pane_active}').split("\n")
+
+    rows.filter_map { |row|
+      *geometry, flags = row.split(' ')
+      next if flags == '10' # zoomed window, inactive pane: hidden
+
+      geometry.join(' ')
+    }.join("\n")
   end
 
   # A one line summary of the window, used in failure messages.
