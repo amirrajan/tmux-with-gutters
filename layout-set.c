@@ -123,6 +123,38 @@ layout_set_previous(struct window *w)
 	return (layout);
 }
 
+/*
+ * A layout covers the window less the border at the window edge, so a window
+ * holding a layout of this size is this much bigger.
+ */
+static u_int
+layout_set_window_size(u_int size)
+{
+	return (size + 2 * LAYOUT_BORDER);
+}
+
+/*
+ * The smallest layout that fits n cells along one axis: every cell needs
+ * PANE_MINIMUM of its own, and each boundary between two of them costs
+ * LAYOUT_SEPARATOR because both panes draw their own border.
+ */
+static u_int
+layout_set_minimum(u_int n)
+{
+	return ((n * PANE_MINIMUM) + ((n - 1) * LAYOUT_SEPARATOR));
+}
+
+/* Space left for n cells along an axis of this size, at least PANE_MINIMUM. */
+static u_int
+layout_set_available(u_int size, u_int n)
+{
+	u_int	 borders = (n - 1) * LAYOUT_SEPARATOR;
+
+	if (size <= borders + PANE_MINIMUM)
+		return (PANE_MINIMUM);
+	return (size - borders);
+}
+
 static struct window_pane *
 layout_set_first_tiled(struct window *w)
 {
@@ -155,7 +187,7 @@ layout_set_even(struct window *w, enum layout_type type)
 {
 	struct window_pane	*wp;
 	struct layout_cell	*lcroot, *lcchild;
-	u_int			 n, sx, sy;
+	u_int			 n, sx, sy, usx, usy;
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
@@ -163,16 +195,19 @@ layout_set_even(struct window *w, enum layout_type type)
 	if (n <= 1)
 		return;
 
+	/* The layout covers the window less the border at the window edge. */
+	layout_window_area(w, &usx, &usy);
+
 	if (type == LAYOUT_LEFTRIGHT) {
-		sx = (n * (PANE_MINIMUM + 1)) - 1;
-		if (sx < w->sx)
-			sx = w->sx;
-		sy = w->sy;
+		sx = layout_set_minimum(n);
+		if (sx < usx)
+			sx = usx;
+		sy = usy;
 	} else {
-		sy = (n * (PANE_MINIMUM + 1)) - 1;
-		if (sy < w->sy)
-			sy = w->sy;
-		sx = w->sx;
+		sy = layout_set_minimum(n);
+		if (sy < usy)
+			sy = usy;
+		sx = usx;
 	}
 
 	layout_free(w, 1);
@@ -185,8 +220,8 @@ layout_set_even(struct window *w, enum layout_type type)
 		TAILQ_INSERT_TAIL(&lcroot->cells, lcchild, entry);
 		lcchild->parent = lcroot;
 		if (layout_cell_is_tiled(lcchild)) {
-			lcchild->g.sx = w->sx;
-			lcchild->g.sy = w->sy;
+			lcchild->g.sx = sx;
+			lcchild->g.sy = sy;
 		}
 	}
 
@@ -197,7 +232,8 @@ layout_set_even(struct window *w, enum layout_type type)
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
-	window_resize(w, lcroot->g.sx, lcroot->g.sy, -1, -1);
+	window_resize(w, layout_set_window_size(lcroot->g.sx),
+	    layout_set_window_size(lcroot->g.sy), -1, -1);
 	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
@@ -219,7 +255,7 @@ layout_set_main_h(struct window *w)
 {
 	struct window_pane	*wp, *wpmain;
 	struct layout_cell	*lcroot, *lcmain, *lcother, *lcchild;
-	u_int			 n, mainh, otherh, sx, sy;
+	u_int			 n, mainh, otherh, sx, sy, usx, usy;
 	char			*cause;
 	const char		*s;
 
@@ -230,8 +266,12 @@ layout_set_main_h(struct window *w)
 		return;
 	n--;	/* take off main pane */
 
-	/* Find available height - take off one line for the border. */
-	sy = w->sy - 1;
+	/*
+	 * Find available height: the window less the border at its edge, less
+	 * the border between the two rows.
+	 */
+	layout_window_area(w, &usx, &usy);
+	sy = layout_set_available(usy, 2);
 
 	/* Get the main pane height. */
 	s = options_get_string(w->options, "main-pane-height");
@@ -261,13 +301,13 @@ layout_set_main_h(struct window *w)
 	}
 
 	/* Work out what width is needed. */
-	sx = (n * (PANE_MINIMUM + 1)) - 1;
-	if (sx < w->sx)
-		sx = w->sx;
+	sx = layout_set_minimum(n);
+	if (sx < usx)
+		sx = usx;
 
 	layout_free(w, 1);
 	lcroot = w->layout_root = layout_create_cell(NULL);
-	layout_set_size(lcroot, sx, mainh + otherh + 1, 0, 0);
+	layout_set_size(lcroot, sx, mainh + otherh + LAYOUT_SEPARATOR, 0, 0);
 	layout_make_node(lcroot, LAYOUT_TOPBOTTOM);
 
 	wpmain = layout_set_first_tiled(w);
@@ -308,7 +348,8 @@ layout_set_main_h(struct window *w)
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
-	window_resize(w, lcroot->g.sx, lcroot->g.sy, -1, -1);
+	window_resize(w, layout_set_window_size(lcroot->g.sx),
+	    layout_set_window_size(lcroot->g.sy), -1, -1);
 	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
@@ -318,7 +359,7 @@ layout_set_main_h_mirrored(struct window *w)
 {
 	struct window_pane	*wp, *wpmain;
 	struct layout_cell	*lcroot, *lcmain, *lcother, *lcchild;
-	u_int			 n, mainh, otherh, sx, sy;
+	u_int			 n, mainh, otherh, sx, sy, usx, usy;
 	char			*cause;
 	const char		*s;
 
@@ -329,8 +370,12 @@ layout_set_main_h_mirrored(struct window *w)
 		return;
 	n--;	/* take off main pane */
 
-	/* Find available height - take off one line for the border. */
-	sy = w->sy - 1;
+	/*
+	 * Find available height: the window less the border at its edge, less
+	 * the border between the two rows.
+	 */
+	layout_window_area(w, &usx, &usy);
+	sy = layout_set_available(usy, 2);
 
 	/* Get the main pane height. */
 	s = options_get_string(w->options, "main-pane-height");
@@ -360,13 +405,13 @@ layout_set_main_h_mirrored(struct window *w)
 	}
 
 	/* Work out what width is needed. */
-	sx = (n * (PANE_MINIMUM + 1)) - 1;
-	if (sx < w->sx)
-		sx = w->sx;
+	sx = layout_set_minimum(n);
+	if (sx < usx)
+		sx = usx;
 
 	layout_free(w, 1);
 	lcroot = w->layout_root = layout_create_cell(NULL);
-	layout_set_size(lcroot, sx, mainh + otherh + 1, 0, 0);
+	layout_set_size(lcroot, sx, mainh + otherh + LAYOUT_SEPARATOR, 0, 0);
 	layout_make_node(lcroot, LAYOUT_TOPBOTTOM);
 
 	wpmain = layout_set_first_tiled(w);
@@ -407,7 +452,8 @@ layout_set_main_h_mirrored(struct window *w)
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
-	window_resize(w, lcroot->g.sx, lcroot->g.sy, -1, -1);
+	window_resize(w, layout_set_window_size(lcroot->g.sx),
+	    layout_set_window_size(lcroot->g.sy), -1, -1);
 	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
@@ -417,7 +463,7 @@ layout_set_main_v(struct window *w)
 {
 	struct window_pane	*wp, *wpmain;
 	struct layout_cell	*lcroot, *lcmain, *lcother, *lcchild;
-	u_int			 n, mainw, otherw, sx, sy;
+	u_int			 n, mainw, otherw, sx, sy, usx, usy;
 	char			*cause;
 	const char		*s;
 
@@ -428,8 +474,12 @@ layout_set_main_v(struct window *w)
 		return;
 	n--;	/* take off main pane */
 
-	/* Find available width - take off one column for the border. */
-	sx = w->sx - 1;
+	/*
+	 * Find available width: the window less the border at its edge, less
+	 * the border between the two columns.
+	 */
+	layout_window_area(w, &usx, &usy);
+	sx = layout_set_available(usx, 2);
 
 	/* Get the main pane width. */
 	s = options_get_string(w->options, "main-pane-width");
@@ -459,13 +509,13 @@ layout_set_main_v(struct window *w)
 	}
 
 	/* Work out what height is needed. */
-	sy = (n * (PANE_MINIMUM + 1)) - 1;
-	if (sy < w->sy)
-		sy = w->sy;
+	sy = layout_set_minimum(n);
+	if (sy < usy)
+		sy = usy;
 
 	layout_free(w, 1);
 	lcroot = w->layout_root = layout_create_cell(NULL);
-	layout_set_size(lcroot, mainw + otherw + 1, sy, 0, 0);
+	layout_set_size(lcroot, mainw + otherw + LAYOUT_SEPARATOR, sy, 0, 0);
 	layout_make_node(lcroot, LAYOUT_LEFTRIGHT);
 
 	wpmain = layout_set_first_tiled(w);
@@ -506,7 +556,8 @@ layout_set_main_v(struct window *w)
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
-	window_resize(w, lcroot->g.sx, lcroot->g.sy, -1, -1);
+	window_resize(w, layout_set_window_size(lcroot->g.sx),
+	    layout_set_window_size(lcroot->g.sy), -1, -1);
 	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
@@ -516,7 +567,7 @@ layout_set_main_v_mirrored(struct window *w)
 {
 	struct window_pane	*wp, *wpmain;
 	struct layout_cell	*lcroot, *lcmain, *lcother, *lcchild;
-	u_int			 n, mainw, otherw, sx, sy;
+	u_int			 n, mainw, otherw, sx, sy, usx, usy;
 	char			*cause;
 	const char		*s;
 
@@ -528,8 +579,12 @@ layout_set_main_v_mirrored(struct window *w)
 		return;
 	n--;	/* take off main pane */
 
-	/* Find available width - take off one column for the border. */
-	sx = w->sx - 1;
+	/*
+	 * Find available width: the window less the border at its edge, less
+	 * the border between the two columns.
+	 */
+	layout_window_area(w, &usx, &usy);
+	sx = layout_set_available(usx, 2);
 
 	/* Get the main pane width. */
 	s = options_get_string(w->options, "main-pane-width");
@@ -559,13 +614,13 @@ layout_set_main_v_mirrored(struct window *w)
 	}
 
 	/* Work out what height is needed. */
-	sy = (n * (PANE_MINIMUM + 1)) - 1;
-	if (sy < w->sy)
-		sy = w->sy;
+	sy = layout_set_minimum(n);
+	if (sy < usy)
+		sy = usy;
 
 	layout_free(w, 1);
 	lcroot = w->layout_root = layout_create_cell(NULL);
-	layout_set_size(lcroot, mainw + otherw + 1, sy, 0, 0);
+	layout_set_size(lcroot, mainw + otherw + LAYOUT_SEPARATOR, sy, 0, 0);
 	layout_make_node(lcroot, LAYOUT_LEFTRIGHT);
 
 	wpmain = layout_set_first_tiled(w);
@@ -606,7 +661,8 @@ layout_set_main_v_mirrored(struct window *w)
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
-	window_resize(w, lcroot->g.sx, lcroot->g.sy, -1, -1);
+	window_resize(w, layout_set_window_size(lcroot->g.sx),
+	    layout_set_window_size(lcroot->g.sy), -1, -1);
 	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
@@ -617,7 +673,7 @@ layout_set_tiled(struct window *w)
 	struct options		*oo = w->options;
 	struct window_pane	*wp;
 	struct layout_cell	*lcroot, *lcrow, *lcchild;
-	u_int			 n, width, height, used, sx, sy;
+	u_int			 n, width, height, used, sx, sy, usx, usy;
 	u_int			 i, j, columns, rows, max_columns;
 
 	layout_print_cell(w->layout_root, __func__, 1);
@@ -639,23 +695,28 @@ layout_set_tiled(struct window *w)
 			columns++;
 	}
 
-	/* What width and height should they be? */
-	width = (w->sx - (columns - 1)) / columns;
+	/*
+	 * What width and height should they be? The grid covers the window
+	 * less the border at its edge, and each boundary inside it costs
+	 * LAYOUT_SEPARATOR because both panes draw their own border.
+	 */
+	layout_window_area(w, &usx, &usy);
+	width = layout_set_available(usx, columns) / columns;
 	if (width < PANE_MINIMUM)
 		width = PANE_MINIMUM;
-	height = (w->sy - (rows - 1)) / rows;
+	height = layout_set_available(usy, rows) / rows;
 	if (height < PANE_MINIMUM)
 		height = PANE_MINIMUM;
 
-	sx = ((width + 1) * columns) - 1;
-	if (sx < w->sx)
-		sx = w->sx;
-	sy = ((height + 1) * rows) - 1;
-	if (sy < w->sy)
-		sy = w->sy;
+	sx = (width * columns) + ((columns - 1) * LAYOUT_SEPARATOR);
+	if (sx < usx)
+		sx = usx;
+	sy = (height * rows) + ((rows - 1) * LAYOUT_SEPARATOR);
+	if (sy < usy)
+		sy = usy;
 
 	log_debug("%s: %u pane(s) in %ux%u window: rows=%u columns=%u "
-	    "width=%u height=%u grid=%ux%u", __func__, n, w->sx, w->sy, rows,
+	    "width=%u height=%u grid=%ux%u", __func__, n, usx, usy, rows,
 	    columns, width, height, sx, sy);
 
 	layout_free(w, 1);
@@ -678,7 +739,7 @@ layout_set_tiled(struct window *w)
 		if (n - (j * columns) == 1 || columns == 1) {
 			lcchild->parent = lcroot;
 			TAILQ_INSERT_TAIL(&lcroot->cells, lcchild, entry);
-			layout_set_size(lcchild, w->sx, height, 0, 0);
+			layout_set_size(lcchild, sx, height, 0, 0);
 			wp = TAILQ_NEXT(wp, entry);
 			continue;
 		}
@@ -686,7 +747,7 @@ layout_set_tiled(struct window *w)
 		/* Create the new row. */
 		lcrow = layout_create_cell(lcroot);
 		layout_make_node(lcrow, LAYOUT_LEFTRIGHT);
-		layout_set_size(lcrow, w->sx, height, 0, 0);
+		layout_set_size(lcrow, sx, height, 0, 0);
 		TAILQ_INSERT_TAIL(&lcroot->cells, lcrow, entry);
 
 		/* Add in the columns. */
@@ -712,19 +773,17 @@ layout_set_tiled(struct window *w)
 		 */
 		if (i == columns)
 			i--;
-		used = ((i + 1) * (width + 1)) - 1;
-		if (w->sx <= used)
+		used = ((i + 1) * width) + (i * LAYOUT_SEPARATOR);
+		if (sx <= used)
 			continue;
 		lcchild = TAILQ_LAST(&lcrow->cells, layout_cells);
-		layout_resize_adjust(w, lcchild, LAYOUT_LEFTRIGHT,
-		    w->sx - used);
+		layout_resize_adjust(w, lcchild, LAYOUT_LEFTRIGHT, sx - used);
 	}
 
-	used = (rows * height) + rows - 1;
-	if (w->sy > used) {
+	used = (rows * height) + ((rows - 1) * LAYOUT_SEPARATOR);
+	if (sy > used) {
 		lcrow = TAILQ_LAST(&lcroot->cells, layout_cells);
-		layout_resize_adjust(w, lcrow, LAYOUT_TOPBOTTOM,
-		    w->sy - used);
+		layout_resize_adjust(w, lcrow, LAYOUT_TOPBOTTOM, sy - used);
 	}
 
 	layout_set_link_floating(w, lcroot);
@@ -733,7 +792,8 @@ layout_set_tiled(struct window *w)
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
-	window_resize(w, lcroot->g.sx, lcroot->g.sy, -1, -1);
+	window_resize(w, layout_set_window_size(lcroot->g.sx),
+	    layout_set_window_size(lcroot->g.sy), -1, -1);
 	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }

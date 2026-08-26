@@ -1539,7 +1539,8 @@ layout_spread_cell(struct window *w, struct layout_cell *parent)
 {
 	struct layout_cell	*lc, *root = w->layout_root;
 	u_int			 number, each, size, this, remainder;
-	int			 change, changed, status;
+	u_int			 index, first_bigger;
+	int			 change, changed, status, bigger;
 
 	number = 0;
 	TAILQ_FOREACH (lc, &parent->cells, entry)
@@ -1580,27 +1581,32 @@ layout_spread_cell(struct window *w, struct layout_cell *parent)
 	    parent->type == LAYOUT_LEFTRIGHT ? "LEFTRIGHT" : "TOPBOTTOM", size,
 	    number, each, remainder);
 
+	/*
+	 * The uneven cells are the last ones, which is where splitting and
+	 * resizing put them too: an 11 column window split in two gives 3 and
+	 * 4, not 4 and 3.
+	 */
+	first_bigger = number - remainder;
+
 	changed = 0;
+	index = 0;
 	TAILQ_FOREACH (lc, &parent->cells, entry) {
 		if (!layout_cell_is_tiled(lc))
 			continue;
+		bigger = (index++ >= first_bigger);
 		change = 0;
 		if (parent->type == LAYOUT_LEFTRIGHT) {
 			change = each - (int)lc->g.sx;
-			if (remainder > 0) {
+			if (bigger)
 				change++;
-				remainder--;
-			}
 			layout_resize_adjust(w, lc, LAYOUT_LEFTRIGHT, change);
 		} else if (parent->type == LAYOUT_TOPBOTTOM) {
 			if (layout_add_horizontal_border(root, lc, status))
 				this = each + 1;
 			else
 				this = each;
-			if (remainder > 0) {
+			if (bigger)
 				this++;
-				remainder--;
-			}
 			change = this - (int)lc->g.sy;
 			layout_resize_adjust(w, lc, LAYOUT_TOPBOTTOM, change);
 		}
