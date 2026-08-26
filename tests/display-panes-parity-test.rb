@@ -1,8 +1,8 @@
 # What the display-panes overlay leaves out of the borders it redraws.
 #
-# FAILING ON PURPOSE. All three tests here describe bugs, not behaviour. They
-# exist so that checking the overlay against the real borders is a test run and
-# not an eyeball pass over a live server.
+# TWO OF FOUR FAIL ON PURPOSE. They exist so that checking the overlay against
+# the real borders is a test run and not an eyeball pass over a live server.
+# The reverse attribute is fixed and pinned; titles and arrows are still open.
 #
 # The overlay is drawn by two renderers at once. Zooming the pane it is a mode
 # of leaves a ring of cells on the window edge that the overlay's own screen
@@ -16,15 +16,22 @@
 #   2. pane-border-status titles
 #   3. pane-border-indicators arrows
 #
-# For a two pane 24x8 window with pane 0 marked, the reverse attribute is on
-# pane 0's whole box normally and on three sides of it with the numbers up,
-# because the fourth side is interior and the overlay does not draw it:
+# The reverse attribute was the first of those, and is fixed: for a two pane
+# 24x8 window with pane 0 marked it was on pane 0's whole box normally and on
+# three sides of it with the numbers up, the fourth being interior:
 #
-#     normal                     overlay
+#     normal                     overlay, before the fix
 #     RRRRRRRRRRRRRRRRRRRRRRRR   RRRRRRRRRRRRRRRRRRRRRRRR
 #     R......................R   R......................R
 #     R......................R   R......................R
 #     RRRRRRRRRRRRRRRRRRRRRRRR   R......................R  <- not reversed
+#
+# window_panes_get_border_style now applies the same exclusive or as
+# redraw_draw_border_span. One thing it does not fix: the overlay's screen is
+# only redrawn on a resize or a key, so marking a pane from another client while
+# the numbers are already up leaves the interior stale until the next redraw.
+# Both tests below mark before the overlay goes up, which is the only way to get
+# there with one client anyway, since the overlay takes every key.
 #
 # Titles and arrows are absent from the overlay everywhere, edge included: the
 # ring pass marks border cells but not status cells, and the overlay never drew
@@ -87,16 +94,62 @@ class DisplayPanesParityTest < Minitest::Test
     @scene.capture
     normal = @scene.capture_escapes
 
-    # Control: the marked box is in reverse to start with, so a failure below is
-    # the overlay's and not a mark that never took.
-    assert_includes reverse_map(normal), 'R',
-                    "the marked pane's border is not in reverse at all"
+    # All four sides of the marked pane's box, absolutely, not just "some cells
+    # are reversed": tiled boxes share no border cell, so the reversed ring is
+    # the marked pane and nothing else. Upstream could only mark the sides a
+    # pane shared with a neighbour, one or two of them, and a lone pane in a
+    # window could not be marked at all. Pinning the picture here means a change
+    # that shrinks the mark back to that in both renderers fails, which the
+    # overlay-against-normal comparison below would not catch.
+    assert_equal <<~REVERSE, reverse_map(normal),
+      RRRRRRRRRRRRRRRRRRRRRRRR
+      R......................R
+      R......................R
+      RRRRRRRRRRRRRRRRRRRRRRRR
+      ........................
+      ........................
+      ........................
+      ........................
+    REVERSE
+                 "the marked pane's box is not reversed on all four sides"
 
     @scene.display_panes
     assert_overlay_drawn @scene.capture
     overlaid = @scene.capture_escapes
 
     assert_same_reverse normal, overlaid,
+                        'display-panes changed which cells are in reverse'
+  end
+
+  # The same with the marked pane not the active one, in a tiled 2x2. Border
+  # cells are owned per box and the active pane wins any cell two boxes share,
+  # so this is where a fix that reverses by owner rather than by mark, or that
+  # loses the mark to the active pane's style, shows up.
+  def test_the_overlay_reverses_a_marked_pane_that_is_not_active
+    @scene = TmuxScene.new(width: 24, height: 12,
+                           conf: "set -w -g pane-border-lines single\n",
+                           delay: 0.5).start
+    @scene.split_window('-h')
+    @scene.split_window('-v')
+    @scene.cmd('select-pane', '-t0')
+    @scene.split_window('-v')
+    @scene.cmd('select-layout', 'tiled')
+    @scene.cmd('select-pane', '-t3')
+    @scene.cmd('select-pane', '-m', '-t1')
+    @scene.blank_panes
+
+    @scene.capture
+    normal = @scene.capture_escapes
+
+    refute_equal @scene.cmd('display', '-p', '\#{pane_index}'), '1',
+                 'the marked pane is the active one, so this is the other test'
+    assert_includes reverse_map(normal), 'R',
+                    "the marked pane's border is not in reverse at all"
+
+    @scene.display_panes
+    assert_overlay_drawn @scene.capture
+
+    assert_same_reverse normal, @scene.capture_escapes,
                         'display-panes changed which cells are in reverse'
   end
 

@@ -253,6 +253,17 @@ window_panes_get_border_style(struct window_panes_modedata *data,
 	style_add(gc, oo, option, ft);
 	style_add(gc, w->options, "display-panes-border-style", ft);
 	format_free(ft);
+
+	/*
+	 * The marked pane's border is drawn in reverse, the same way and with
+	 * the same exclusive or as redraw_draw_border_span does it outside the
+	 * overlay. Without this the ring of cells on the window edge, which
+	 * screen-redraw.c draws, is the only part of the marked pane's box in
+	 * reverse while the numbers are up.
+	 */
+	if (wp != NULL && wp == marked_pane.wp &&
+	    server_is_marked(s, s->curw, marked_pane.wp))
+		gc->attr ^= GRID_ATTR_REVERSE;
 }
 
 /* Line style for one cell of the overlay, from the owning pane. */
