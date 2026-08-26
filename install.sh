@@ -20,6 +20,8 @@
 #
 # The install step is run with sudo when the target directory is not writable.
 
+brew install jemalloc
+
 set -eu
 
 ROOT=$(cd -- "$(dirname -- "$0")" && pwd)
