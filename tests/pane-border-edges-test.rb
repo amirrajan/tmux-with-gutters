@@ -708,4 +708,54 @@ class PaneBorderEdgesTest < Minitest::Test
 
     assert @scene.alive?, 'inner server died'
   end
+
+  # The overlay is a miniature of the window, so a border in it must be styled
+  # like the same border outside it: the overlay has its own renderer and used
+  # to paint every border with one flat style of its own, which showed up as
+  # borders that changed colour, and lost their background, while the numbers
+  # were up.
+  #
+  # Backgrounds are used because they can be read back per cell: the inactive
+  # panes' borders are SGR 44, the active pane's border is SGR 41 and pane
+  # content is on the default background.
+  def test_display_panes_overlay_borders_keep_the_pane_border_styles
+    conf = <<~CONF
+      set -w -g pane-border-lines single
+      set -g pane-border-style bg=colour4
+      set -g pane-active-border-style bg=colour1
+    CONF
+
+    @scene = TmuxScene.new(width: 24, height: 12, conf: conf, delay: 0.5).start
+    @scene.split_window('-h')
+    @scene.split_window('-v')
+    @scene.cmd('select-pane', '-t0')
+    @scene.split_window('-v')
+    @scene.cmd('select-layout', 'tiled')
+    @scene.cmd('select-pane', '-t0')
+    @scene.fill_panes
+
+    @scene.display_panes
+
+    # The ring on the window edge is the box of the pane the overlay is a mode
+    # of, which is the active pane, so it is the active border style. Every
+    # border inside it is drawn by the overlay, and each one carries the style
+    # of the pane it belongs to: the active pane's box is A, the other three
+    # are I.
+    assert_style_map @scene, <<~STYLES, 41 => 'A', 44 => 'I', 49 => 'b'
+      AAAAAAAAAAAAAAAAAAAAAAAA
+      AbbbbbbbbbbAIbbbbbbbbbbA
+      AbbbbbbbbbbAIbbbbbbbbbbA
+      AbbbbbbbbbbAIbbbbbbbbbbA
+      AbbbbbbbbbbAIbbbbbbbbbbA
+      AAAAAAAAAAAAIIIIIIIIIIIA
+      AIIIIIIIIIIIIIIIIIIIIIIA
+      AbbbbbbbbbbIIbbbbbbbbbbA
+      AbbbbbbbbbbIIbbbbbbbbbbA
+      AbbbbbbbbbbIIbbbbbbbbbbA
+      AbbbbbbbbbbIIbbbbbbbbbbA
+      AAAAAAAAAAAAAAAAAAAAAAAA
+    STYLES
+
+    assert @scene.alive?, 'inner server died'
+  end
 end

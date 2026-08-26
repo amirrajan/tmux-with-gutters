@@ -1341,10 +1341,10 @@ const struct options_table_entry options_table[] = {
 	{ .name = "display-panes-border-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "bg=themedarkgrey,fg=themelightgrey",
+	  .default_str = "default",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
-	  .text = "Style of the pane borders in 'display-panes'."
+	  .text = "Style laid over the pane border styles in 'display-panes'."
 	},
 
 	{ .name = "display-panes-colour",

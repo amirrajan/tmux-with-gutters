@@ -222,18 +222,82 @@ window_panes_get_geometry(struct window_pane *wp, struct layout_cell *root,
 	return (1);
 }
 
+/*
+ * Border style for one cell of the overlay. The overlay is a miniature of the
+ * window, so a border in it is styled like the same border outside it: the
+ * owning pane's pane-border-style, or pane-active-border-style for the active
+ * pane, with display-panes-border-style laid on top as an override.
+ */
 static void
-window_panes_get_border_cell(struct window_panes_modedata *data,
-    struct grid_cell *gc)
+window_panes_get_border_style(struct window_panes_modedata *data,
+    struct window *w, struct window_pane *wp, struct grid_cell *gc)
 {
 	struct format_tree	*ft;
-	struct window_pane	*wp = data->wp;
 	struct session		*s = data->session;
+	struct options		*oo;
+	const char		*option;
+
+	if (wp != NULL) {
+		oo = wp->options;
+		if (wp == w->active)
+			option = "pane-active-border-style";
+		else
+			option = "pane-border-style";
+	} else {
+		oo = w->options;
+		option = "pane-border-style";
+	}
 
 	memcpy(gc, &grid_default_cell, sizeof *gc);
 	ft = format_create_defaults(NULL, NULL, s, s->curw, wp);
-	style_apply(gc, wp->window->options, "display-panes-border-style", ft);
+	style_add(gc, oo, option, ft);
+	style_add(gc, w->options, "display-panes-border-style", ft);
 	format_free(ft);
+}
+
+/* Line style for one cell of the overlay, from the owning pane. */
+static enum pane_lines
+window_panes_get_border_lines(struct window *w, struct window_pane *wp)
+{
+	if (wp != NULL)
+		return (window_pane_get_pane_lines(wp));
+	return (options_get_number(w->options, "pane-border-lines"));
+}
+
+/*
+ * Remember which pane's box a border cell belongs to, so it can be styled like
+ * that pane's border. The active pane wins any cell it shares, as its border
+ * is the one the eye is meant to follow.
+ */
+static void
+window_panes_mark_owner(struct window_pane **owners, struct window *w,
+    struct window_pane *wp, u_int dsx, u_int dsy, int x, int y)
+{
+	struct window_pane	**slot;
+
+	if (wp == NULL || x < 0 || y < 0 || (u_int)x >= dsx || (u_int)y >= dsy)
+		return;
+	slot = &owners[(u_int)y * dsx + (u_int)x];
+	if (*slot == NULL || wp == w->active)
+		*slot = wp;
+}
+
+static void
+window_panes_mark_owner_box(struct window_pane **owners, struct window *w,
+    struct window_pane *wp, u_int dsx, u_int dsy, int x, int y, int x2, int y2)
+{
+	int	xx, yy;
+
+	if (owners == NULL || wp == NULL)
+		return;
+	for (xx = x; xx <= x2; xx++) {
+		window_panes_mark_owner(owners, w, wp, dsx, dsy, xx, y);
+		window_panes_mark_owner(owners, w, wp, dsx, dsy, xx, y2);
+	}
+	for (yy = y; yy <= y2; yy++) {
+		window_panes_mark_owner(owners, w, wp, dsx, dsy, x, yy);
+		window_panes_mark_owner(owners, w, wp, dsx, dsy, x2, yy);
+	}
 }
 
 /*
@@ -324,8 +388,9 @@ window_panes_mark_hline(u_char *map, u_int dsx, u_int dsy, int x, int x2, int y)
  * and there are no T junctions or crossings to join up.
  */
 static void
-window_panes_mark_borders_cell(u_char *map, struct layout_cell *lc, u_int osx,
-    u_int osy, u_int dsx, u_int dsy)
+window_panes_mark_borders_cell(u_char *map, struct window_pane **owners,
+    struct window *w, struct layout_cell *lc, u_int osx, u_int osy, u_int dsx,
+    u_int dsy)
 {
 	struct layout_cell	*lcchild;
 	int			 x, y, x2, y2;
@@ -334,8 +399,8 @@ window_panes_mark_borders_cell(u_char *map, struct layout_cell *lc, u_int osx,
 		return;
 	if (lc->type != LAYOUT_WINDOWPANE) {
 		TAILQ_FOREACH(lcchild, &lc->cells, entry)
-			window_panes_mark_borders_cell(map, lcchild, osx, osy,
-			    dsx, dsy);
+			window_panes_mark_borders_cell(map, owners, w, lcchild,
+			    osx, osy, dsx, dsy);
 		return;
 	}
 
@@ -352,11 +417,13 @@ window_panes_mark_borders_cell(u_char *map, struct layout_cell *lc, u_int osx,
 	window_panes_mark_hline(map, dsx, dsy, x, x2 + 1, y2);
 	window_panes_mark_vline(map, dsx, dsy, x, y, y2 + 1);
 	window_panes_mark_vline(map, dsx, dsy, x2, y, y2 + 1);
+	window_panes_mark_owner_box(owners, w, lc->wp, dsx, dsy, x, y, x2, y2);
 }
 
 static void
-window_panes_mark_pane_status_borders(u_char *map, struct window *w,
-    struct layout_cell *root, u_int osx, u_int osy, u_int dsx, u_int dsy)
+window_panes_mark_pane_status_borders(u_char *map, struct window_pane **owners,
+    struct window *w, struct layout_cell *root, u_int osx, u_int osy, u_int dsx,
+    u_int dsy)
 {
 	struct window_pane	*wp;
 	struct layout_cell	*lc;
@@ -387,6 +454,8 @@ window_panes_mark_pane_status_borders(u_char *map, struct window *w,
 			y = y2 - 1;
 		}
 		window_panes_mark_hline(map, dsx, dsy, x, x2, y);
+		window_panes_mark_owner_box(owners, w, wp, dsx, dsy, x, y, x2 - 1,
+		    y);
 	}
 }
 
@@ -484,21 +553,23 @@ window_panes_border_cell_type(u_char mask)
 }
 
 static void
-window_panes_draw_borders(struct screen_write_ctx *ctx, struct window *w,
-    struct layout_cell *lc, const struct grid_cell *gc, u_int osx, u_int osy,
-    u_int dsx, u_int dsy)
+window_panes_draw_borders(struct window_panes_modedata *data,
+    struct screen_write_ctx *ctx, struct window *w, struct layout_cell *lc,
+    u_int osx, u_int osy, u_int dsx, u_int dsy)
 {
-	struct grid_cell	 border_gc;
-	u_char			*map;
-	u_int			 xx, yy;
-	int			 cell_type;
+	struct grid_cell	  border_gc;
+	struct window_pane	**owners, *owner;
+	u_char			 *map;
+	u_int			  xx, yy;
+	int			  cell_type;
 
 	if (dsx == 0 || dsy == 0)
 		return;
 
 	map = xcalloc(dsx, dsy);
-	window_panes_mark_borders_cell(map, lc, osx, osy, dsx, dsy);
-	window_panes_mark_pane_status_borders(map, w, lc, osx, osy, dsx,
+	owners = xcalloc(dsx * dsy, sizeof *owners);
+	window_panes_mark_borders_cell(map, owners, w, lc, osx, osy, dsx, dsy);
+	window_panes_mark_pane_status_borders(map, owners, w, lc, osx, osy, dsx,
 	    dsy);
 
 	for (yy = 0; yy < dsy; yy++) {
@@ -507,20 +578,24 @@ window_panes_draw_borders(struct screen_write_ctx *ctx, struct window *w,
 				continue;
 			cell_type = window_panes_border_cell_type(
 			    map[yy * dsx + xx]);
-			memcpy(&border_gc, gc, sizeof border_gc);
-			border_gc.attr |= GRID_ATTR_CHARSET;
-			utf8_set(&border_gc.data, CELL_BORDERS[cell_type]);
+			owner = owners[yy * dsx + xx];
+			window_panes_get_border_style(data, w, owner,
+			    &border_gc);
+			window_get_border_cell(owner,
+			    window_panes_get_border_lines(w, owner), cell_type,
+			    &border_gc);
 			screen_write_cursormove(ctx, xx, yy, 0);
 			screen_write_cell(ctx, &border_gc);
 		}
 	}
+	free(owners);
 	free(map);
 }
 
 static void
-window_panes_draw_floating_border(struct screen_write_ctx *ctx,
-    struct window_pane *wp, const struct grid_cell *gc, u_int osx, u_int osy,
-    u_int dsx, u_int dsy)
+window_panes_draw_floating_border(struct window_panes_modedata *data,
+    struct screen_write_ctx *ctx, struct window *w, struct window_pane *wp,
+    u_int osx, u_int osy, u_int dsx, u_int dsy)
 {
 	struct grid_cell	 border_gc;
 	u_char			*map;
@@ -545,9 +620,10 @@ window_panes_draw_floating_border(struct screen_write_ctx *ctx,
 				continue;
 			cell_type = window_panes_border_cell_type(
 			    map[yy * dsx + xx]);
-			memcpy(&border_gc, gc, sizeof border_gc);
-			border_gc.attr |= GRID_ATTR_CHARSET;
-			utf8_set(&border_gc.data, CELL_BORDERS[cell_type]);
+			window_panes_get_border_style(data, w, wp, &border_gc);
+			window_get_border_cell(wp,
+			    window_panes_get_border_lines(w, wp), cell_type,
+			    &border_gc);
 			screen_write_cursormove(ctx, xx, yy, 0);
 			screen_write_cell(ctx, &border_gc);
 		}
@@ -742,7 +818,6 @@ window_panes_draw_screen(struct window_mode_entry *wme)
 	struct window_pane		*wp;
 	struct screen_write_ctx		 ctx;
 	struct layout_cell		*root;
-	struct grid_cell		 border_gc;
 	u_int				 osx, osy, sx, sy;
 
 	if (!window_panes_get_source(data, NULL, NULL, &w))
@@ -766,15 +841,14 @@ window_panes_draw_screen(struct window_mode_entry *wme)
 			continue;
 		window_panes_draw_pane(data, &ctx, wp, root, osx, osy, sx, sy);
 	}
-	window_panes_get_border_cell(data, &border_gc);
-	window_panes_draw_borders(&ctx, w, root, &border_gc, osx, osy, sx, sy);
+	window_panes_draw_borders(data, &ctx, w, root, osx, osy, sx, sy);
 	TAILQ_FOREACH_REVERSE(wp, &w->z_index, window_panes_zindex, zentry) {
 		if (!window_panes_pane_floating(wp))
 			continue;
 		window_panes_clear_floating_area(&ctx, wp, osx, osy, sx, sy);
 		window_panes_draw_pane(data, &ctx, wp, root, osx, osy, sx, sy);
-		window_panes_draw_floating_border(&ctx, wp, &border_gc, osx,
-		    osy, sx, sy);
+		window_panes_draw_floating_border(data, &ctx, w, wp, osx, osy,
+		    sx, sy);
 	}
 	screen_write_stop(&ctx);
 
