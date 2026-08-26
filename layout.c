@@ -841,6 +841,7 @@ layout_resize(struct window *w, u_int sx, u_int sy)
 	/* Fix cell offsets. */
 	layout_fix_offsets(w);
 	layout_fix_panes(w, NULL);
+	layout_print_cell(w->layout_root, __func__, 1);
 }
 
 /* Resize a pane to an absolute size. */
@@ -1000,6 +1001,7 @@ layout_resize_pane(struct window_pane *wp, enum layout_type type, int change,
 	}
 
 	layout_resize_layout(wp->window, lc, type, change, opposite);
+	layout_print_cell(wp->window->layout_root, __func__, 1);
 }
 
 /* Helper function to grow pane. */
@@ -1239,6 +1241,7 @@ layout_resize_child_cells(struct window *w, struct layout_cell *lc)
 		layout_resize_child_cells(w, lcchild);
 		idx++;
 	}
+	layout_print_cell(lc, __func__, 1);
 }
 
 /*
@@ -1466,6 +1469,7 @@ layout_split_pane(struct window_pane *wp, enum layout_type type, int size,
 	} else
 		layout_make_leaf(lc, wp);
 
+	layout_print_cell(wp->window->layout_root, __func__, 1);
 	return (lcnew);
 }
 
@@ -1519,6 +1523,7 @@ layout_close_pane(struct window_pane *wp)
 		layout_fix_offsets(w);
 		layout_fix_panes(w, NULL);
 	}
+	layout_print_cell(w->layout_root, __func__, 1);
 	events_fire_window("window-layout-changed", w);
 }
 
