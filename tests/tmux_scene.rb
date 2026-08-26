@@ -119,6 +119,33 @@ class TmuxScene
     self
   end
 
+  # Resize the window without touching the size of the client it is drawn in,
+  # so the window is smaller (or bigger) than the client and screen-redraw.c
+  # has to fill and border the area outside it. The scene still captures the
+  # whole client, which is what the picture in a test describes.
+  #
+  # Only useful once, and after any pane setup: the panes are resized with the
+  # window, so refill_panes afterwards if their content matters.
+  def shrink_window(width:, height:)
+    @window_width = width
+    @window_height = height
+    inner('resizew', '-x', width.to_s, '-y', height.to_s)
+    settle(2)
+
+    debug_layout("shrink-window #{width}x#{height}")
+    self
+  end
+
+  # The size of the window itself, which is the size of the scene unless
+  # shrink_window has moved it.
+  def window_width
+    @window_width || width
+  end
+
+  def window_height
+    @window_height || height
+  end
+
   # Split the current window, e.g. split_window('-h').
   def split_window(*args)
     inner('split-window', *args)
