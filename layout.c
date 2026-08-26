@@ -66,6 +66,16 @@ layout_geometry_init(struct layout_geometry *lg)
 	lg->yoff = INT_MAX;
 }
 
+/* The area a layout may use: the window less the outer border. */
+void
+layout_window_area(struct window *w, u_int *sx, u_int *sy)
+{
+	u_int	 inset = 2 * LAYOUT_BORDER;
+
+	*sx = (w->sx > inset) ? w->sx - inset : 1;
+	*sy = (w->sy > inset) ? w->sy - inset : 1;
+}
+
 /* Create a new layout cell. */
 struct layout_cell *
 layout_create_cell(struct layout_cell *lcparent)
@@ -364,8 +374,8 @@ layout_fix_offsets(struct window *w)
 	if (lc->flags & LAYOUT_CELL_FLOATING)
 		return;
 
-	lc->g.xoff = 0;
-	lc->g.yoff = 0;
+	lc->g.xoff = LAYOUT_BORDER;
+	lc->g.yoff = LAYOUT_BORDER;
 
 	layout_fix_offsets1(lc);
 }
@@ -775,9 +785,12 @@ void
 layout_init(struct window *w, struct window_pane *wp)
 {
 	struct layout_cell	*lc;
+	u_int			 sx, sy;
+
+	layout_window_area(w, &sx, &sy);
 
 	lc = w->layout_root = layout_create_cell(NULL);
-	layout_set_size(lc, w->sx, w->sy, 0, 0);
+	layout_set_size(lc, sx, sy, LAYOUT_BORDER, LAYOUT_BORDER);
 	layout_make_leaf(lc, wp);
 	layout_fix_panes(w, NULL);
 }
@@ -795,6 +808,11 @@ layout_resize(struct window *w, u_int sx, u_int sy)
 {
 	struct layout_cell	*lc = w->layout_root;
 	int			 xlimit, ylimit, xchange, ychange;
+	u_int			 inset = 2 * LAYOUT_BORDER;
+
+	/* The layout covers the window less the outer border. */
+	sx = (sx > inset) ? sx - inset : 1;
+	sy = (sy > inset) ? sy - inset : 1;
 
 	/*
 	 * Adjust horizontally. Do not attempt to reduce the layout lower than

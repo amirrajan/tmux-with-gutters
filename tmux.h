@@ -108,6 +108,14 @@ struct winlink;
 
 /* Minimum and maximum layout cell size, NOT including border lines. */
 #define PANE_MINIMUM 1
+
+/*
+ * Every pane is drawn with a border on all four sides, including the sides at
+ * the window edge, so the layout is inset by one cell all round: the root cell
+ * covers the window less that border, and a pane's border is drawn in the
+ * cells just outside its own cell.
+ */
+#define LAYOUT_BORDER 1
 #define PANE_MAXIMUM 10000
 
 /* Minimum and maximum window size. */
@@ -3847,6 +3855,7 @@ struct visible_ranges *window_visible_ranges(struct window_pane *, int, int,
 		     u_int, struct visible_ranges *);
 
 /* layout.c */
+void		 layout_window_area(struct window *, u_int *, u_int *);
 u_int		 layout_count_cells(struct layout_cell *);
 struct layout_cell *layout_create_cell(struct layout_cell *);
 void		 layout_free_cell(struct layout_cell *, int);
