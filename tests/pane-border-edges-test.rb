@@ -76,6 +76,52 @@ class PaneBorderEdgesTest < Minitest::Test
     assert @scene.alive?, 'inner server died'
   end
 
+  # Resizing the window must keep the single pane boxed, with the box following
+  # the window edge rather than being drawn once at the original size. The
+  # window grows on both axes, so the pane grows by the same amount.
+  def test_single_pane_is_boxed_after_resize
+    conf = <<~CONF
+      set -w -g pane-border-lines single
+    CONF
+
+    @scene = TmuxScene.new(width: 11, height: 4, conf: conf).start
+    @scene.resize_window(width: 14, height: 6)
+    @scene.fill_panes
+    @scene.capture
+
+    assert_layout @scene, <<~LAYOUT
+      ┌────────────┐
+      │............│
+      │............│
+      │............│
+      │............│
+      └────────────┘
+    LAYOUT
+
+    assert @scene.alive?, 'inner server died'
+  end
+
+  # And shrinking, which is the direction that has to give space back.
+  def test_single_pane_is_boxed_after_shrink
+    conf = <<~CONF
+      set -w -g pane-border-lines single
+    CONF
+
+    @scene = TmuxScene.new(width: 14, height: 6, conf: conf).start
+    @scene.resize_window(width: 11, height: 4)
+    @scene.fill_panes
+    @scene.capture
+
+    assert_layout @scene, <<~LAYOUT
+      ┌─────────┐
+      │.........│
+      │.........│
+      └─────────┘
+    LAYOUT
+
+    assert @scene.alive?, 'inner server died'
+  end
+
   # A single pane with pane-border-status top: the title goes into the pane's
   # own top border, which already exists, so the pane keeps the size it has
   # with the status off. Compare with test_single_pane_is_boxed, which is the
