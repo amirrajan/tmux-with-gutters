@@ -2007,7 +2007,7 @@ layout_insert_tile(struct window *w, struct layout_cell *lc)
 {
 	struct layout_cell	*lcneighbour, *lctiled, *lcparent;
 	enum layout_type	 type;
-	u_int			 size1, size2, saved_size;
+	u_int			 size1, size2, saved_size, sx, sy;
 
 	if (lc == NULL)
 		fatalx("layout cell cannot be null when tiling");
@@ -2017,8 +2017,13 @@ layout_insert_tile(struct window *w, struct layout_cell *lc)
 
 	lcparent = lc->parent;
 	if (lcparent == NULL) {
-		/* Only pane in the layout. */
-		layout_set_size(lc, w->sx, w->sy, 0, 0);
+		/*
+		 * Only pane in the layout, so it is the single pane cell
+		 * layout_init would have built: the window less the border at
+		 * its edge, inset by that border.
+		 */
+		layout_window_area(w, &sx, &sy);
+		layout_set_size(lc, sx, sy, LAYOUT_BORDER, LAYOUT_BORDER);
 		return (0);
 	}
 
