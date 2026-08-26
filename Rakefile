@@ -1,10 +1,14 @@
 require 'fileutils'
+require 'rbconfig'
 require 'shellwords'
 
 ROOT       = File.expand_path(__dir__)
 PREFIX     = File.join(ROOT, 'build-output')
 TMUX_BIN   = File.join(PREFIX, 'bin', 'tmux')
 REGRESS    = File.join(ROOT, 'regress')
+# Minitest suites (tests/*-test.rb), run by `rake tests` rather than by the
+# shell driven regress suite (`rake regress`).
+TESTS      = File.join(ROOT, 'tests')
 LOGDIR     = File.join(REGRESS, 'logs')
 CONFIGURE_STAMP = File.join(ROOT, '.rake-configure-stamp')
 MAKE       = ENV['MAKE'] || (system('command -v gmake >/dev/null 2>&1') ? 'gmake' : 'make')
@@ -471,7 +475,7 @@ def report(ignored, failures)
   raise "#{failures.size} test(s) failed"
 end
 
-def test
+def run_regress
   raise 'not built; run build first' unless File.executable?(TMUX_BIN)
 
   kill_stale_servers
@@ -488,6 +492,43 @@ def test
   report(ignored, run_lanes(topics))
 end
 
+# Run the minitest suites in tests/. These render a tmux scene and assert on
+# what is actually drawn, so they need the same clean environment as the shell
+# tests: env -i plus a usable PATH for ruby itself. TEST=name runs one suite,
+# matched against the file name.
+def run_minitest
+  raise 'not built; run build first' unless File.executable?(TMUX_BIN)
+
+  kill_stale_servers
+
+  only = ENV['TEST']
+  suites = Dir[File.join(TESTS, '*-test.rb')].sort
+  suites = suites.select { |p| File.basename(p).include?(only) } if only
+  raise 'no minitest suites found' if suites.empty?
+
+  puts "running #{suites.size} minitest suite(s): " \
+       "#{suites.map { |p| File.basename(p) }.join(', ')}"
+
+  env = {
+    'LC_CTYPE' => 'C.UTF-8',
+    'MallocNanoZone' => '0',
+    'TEST_TMUX' => TMUX_BIN,
+    'PATH' => "#{File.dirname(RbConfig.ruby)}:/bin:/usr/bin",
+    'HOME' => Dir.home,
+    'BUNDLE_GEMFILE' => File.join(ROOT, 'Gemfile')
+  }
+
+  failed = suites.reject do |path|
+    name = File.basename(path)
+    puts "==> #{name}"
+    system(env, RbConfig.ruby, path, chdir: TESTS, unsetenv_others: true)
+  end
+
+  return if failed.empty?
+
+  raise "minitest failures: #{failed.map { |p| File.basename(p) }.join(', ')}"
+end
+
 desc 'remove build artifacts, build-output/ and test logs'
 task(:clean) { clean }
 
@@ -498,15 +539,24 @@ desc 'clean then build from scratch'
 task rebuild: %i[clean build]
 
 desc 'run regress suite against build-output/bin/tmux (topics=a,b to select)'
-task(test: :build) { test }
+task(regress: :build) { run_regress }
 
-desc 'run only the :focus topic'
+desc 'run only the :focus topic of the regress suite'
 task(focus: :build) do
   ENV['topics'] = 'focus'
-  test
+  run_regress
 end
 
+desc 'run the minitest suites in tests/ (TEST=name to select one)'
+task(tests: :build) { run_minitest }
+
+# Alias, so both spellings work.
+task test: :tests
+
+# Building is the safe default; the suites take minutes and are asked for
+# explicitly.
 task :default do
   build
-  test
+  puts
+  puts 'built. run `rake regress` or `rake tests`'
 end
