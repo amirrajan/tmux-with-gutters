@@ -76,6 +76,58 @@ class PaneBorderEdgesTest < Minitest::Test
     assert @scene.alive?, 'inner server died'
   end
 
+  # A single pane with pane-border-status top: the title goes into the pane's
+  # own top border, which already exists, so the pane keeps the size it has
+  # with the status off. Compare with test_single_pane_is_boxed, which is the
+  # same window without the status.
+  #
+  # The status is drawn in the pane's own border starting one cell in from the
+  # corner, and the format is left aligned unless it says otherwise, so "title"
+  # starts in the second cell of the border run.
+  def test_single_pane_title_top
+    conf = <<~CONF
+      set -w -g pane-border-lines single
+      set -w -g pane-border-status top
+      set -w -g pane-border-format "title"
+    CONF
+
+    @scene = TmuxScene.new(width: 11, height: 4, conf: conf).start
+    @scene.fill_panes
+    @scene.capture
+
+    assert_layout @scene, <<~LAYOUT
+      ┌─title───┐
+      │.........│
+      │.........│
+      └─────────┘
+    LAYOUT
+
+    assert @scene.alive?, 'inner server died'
+  end
+
+  # The same with pane-border-status bottom: the title goes into the pane's own
+  # bottom border, again without changing the pane's size.
+  def test_single_pane_title_bottom
+    conf = <<~CONF
+      set -w -g pane-border-lines single
+      set -w -g pane-border-status bottom
+      set -w -g pane-border-format "title"
+    CONF
+
+    @scene = TmuxScene.new(width: 11, height: 4, conf: conf).start
+    @scene.fill_panes
+    @scene.capture
+
+    assert_layout @scene, <<~LAYOUT
+      ┌─────────┐
+      │.........│
+      │.........│
+      └─title───┘
+    LAYOUT
+
+    assert @scene.alive?, 'inner server died'
+  end
+
   # Two panes side by side must each get their own complete box, so the facing
   # sides are two adjacent columns rather than one shared column. Today there is
   # a single shared border column and no box.
