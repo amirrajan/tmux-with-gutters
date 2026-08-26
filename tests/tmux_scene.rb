@@ -56,7 +56,10 @@ class TmuxScene
   # problem, and both are invisible from the assertion alone.
   DEBUG = !ENV['SCENE_DEBUG'].to_s.empty?
 
-  attr_reader :width, :height, :captured, :delay
+  attr_reader :captured, :delay
+
+  # The window size the scene currently expects; resize_window changes it.
+  attr_reader :width, :height
 
   def initialize(width:, height:, conf: '', tmux: nil, delay: DEFAULT_DELAY)
     @width = width
@@ -95,6 +98,24 @@ class TmuxScene
     inner('resizew', '-x', width.to_s, '-y', height.to_s)
     settle(1)
     debug_layout("start")
+    self
+  end
+
+  # Resize the window, and with it the size the scene expects to capture. The
+  # outer pane is refitted if a client is already attached, so this works
+  # before or after the scene has been captured.
+  def resize_window(width:, height:)
+    @width = width
+    @height = height
+    inner('resizew', '-x', width.to_s, '-y', height.to_s)
+
+    if @attached
+      fit_outer_pane
+      wait_for_client
+    end
+    settle(1)
+
+    debug_layout("resize-window #{width}x#{height}")
     self
   end
 
