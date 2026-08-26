@@ -465,15 +465,15 @@ module SceneAssertions
   # that is not a border glyph is blanked out first, so pane content and
   # overlays are ignored and only the border skeleton is compared.
   #
-  # The cells on the window edge are compared by presence only. A pane that
-  # covers the whole window, as the display-panes overlay pane does, is boxed
-  # like any other pane, and that box is its own border: it occupies the same
-  # ring of cells as the outer sides of the panes it hides, but it is one
-  # continuous box rather than one box per pane, so the glyphs there differ
-  # while the cells do not.
-  def assert_same_borders(before, after, message = 'borders moved')
-    want = border_skeleton(before, edge_presence: true)
-    got = border_skeleton(after, edge_presence: true)
+  # With edge_presence, the cells on the window edge are compared by presence
+  # only, which is what a caller wants when one of the two scenes has a pane
+  # covering the whole window: that pane is boxed like any other, so its box
+  # occupies the same ring of cells as the outer sides of the panes it hides
+  # while the glyphs there can differ.
+  def assert_same_borders(before, after, message = 'borders moved',
+                          edge_presence: true)
+    want = border_skeleton(before, edge_presence: edge_presence)
+    got = border_skeleton(after, edge_presence: edge_presence)
     return if want == got
 
     report = [

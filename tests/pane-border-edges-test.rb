@@ -709,6 +709,44 @@ class PaneBorderEdgesTest < Minitest::Test
     assert @scene.alive?, 'inner server died'
   end
 
+  # The overlay is a picture of the window, so it must draw the same glyph in
+  # every border cell, on the window edge as well as inside it. The glyphs on
+  # the edge are the ones the overlay renderer cannot reach: the mode's screen
+  # is the zoomed pane's content, which stops one cell short of the window on
+  # every side, so the ring is drawn by screen-redraw.c from the zoomed pane's
+  # own box and comes out as one continuous rectangle. Every corner and T
+  # junction where a hidden pane's box meets the window edge is lost: three
+  # stacked panes lose the six elbows on each side and get plain verticals.
+  #
+  # This is the same comparison as
+  # test_display_panes_draws_borders_in_the_same_place, without the window edge
+  # being reduced to presence only.
+  def test_display_panes_draws_the_same_border_glyphs_on_the_window_edge
+    conf = <<~CONF
+      set -w -g pane-border-lines single
+    CONF
+
+    @scene = TmuxScene.new(width: 24, height: 12, conf: conf, delay: 0.5).start
+    @scene.split_window('-v')
+    @scene.split_window('-v')
+    @scene.cmd('select-layout', 'even-vertical')
+    @scene.blank_panes
+
+    normal = @scene.capture
+    @scene.display_panes
+    overlaid = @scene.capture
+
+    assert_match(/\d+x\d+/, overlaid,
+                 "display-panes overlay was not drawn, so the border " \
+                 "comparison would be vacuous\n\n#{overlaid}")
+
+    assert_same_borders normal, overlaid,
+                        'display-panes changed the border glyphs',
+                        edge_presence: false
+
+    assert @scene.alive?, 'inner server died'
+  end
+
   # The overlay is a miniature of the window, so a border in it must be styled
   # like the same border outside it: the overlay has its own renderer and used
   # to paint every border with one flat style of its own, which showed up as
