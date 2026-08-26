@@ -14,13 +14,20 @@
 # Usage:
 #   sh ./install.sh                     # /usr/local, the autotools default
 #   PREFIX=/usr sh ./install.sh         # somewhere else
-#   BUILD_DIR=/tmp/tmux sh ./install.sh # build somewhere else
+#   BUILD_DIR=/tmp/tmux-with-gutters sh ./install.sh # build somewhere else
 #   JOBS=4 sh ./install.sh              # fewer compile jobs
 #   CONFIGURE_ARGS="--disable-utf8proc" sh ./install.sh
 #
 # The install step is run with sudo when the target directory is not writable.
 
-brew install jemalloc
+case "$(uname -s)" in
+	Darwin)
+		brew install jemalloc
+		;;
+	Linux)
+		yay -S jemalloc
+		;;
+esac
 
 set -eu
 
@@ -74,7 +81,7 @@ cd "$BUILD_DIR"
 
 say "configuring with prefix $PREFIX"
 # shellcheck disable=SC2086 # CONFIGURE_ARGS is a list of arguments on purpose.
-"$ROOT/configure" --prefix="$PREFIX" CFLAGS="$CFLAGS" $CONFIGURE_ARGS
+"$ROOT/configure" --prefix="$PREFIX" --program-transform-name='s/tmux/tmux-with-gutters/' CFLAGS="$CFLAGS" $CONFIGURE_ARGS
 
 say "building with $MAKE -j$JOBS"
 $MAKE "-j$JOBS"
@@ -82,5 +89,5 @@ $MAKE "-j$JOBS"
 say "installing into $PREFIX"
 as_root $MAKE install
 
-say "installed: $(command -v "$PREFIX/bin/tmux")"
-"$PREFIX/bin/tmux" -V
+say "installed: $(command -v "$PREFIX/bin/tmux-with-gutters")"
+"$PREFIX/bin/tmux-with-gutters" -V
