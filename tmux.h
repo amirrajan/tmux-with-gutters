@@ -3862,6 +3862,7 @@ struct visible_ranges *window_visible_ranges(struct window_pane *, int, int,
 
 /* layout.c */
 void		 layout_window_area(struct window *, u_int *, u_int *);
+void		 layout_fit_window(struct window *, struct layout_cell *);
 u_int		 layout_count_cells(struct layout_cell *);
 struct layout_cell *layout_create_cell(struct layout_cell *);
 void		 layout_free_cell(struct layout_cell *, int);

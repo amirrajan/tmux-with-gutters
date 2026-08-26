@@ -76,6 +76,20 @@ layout_window_area(struct window *w, u_int *sx, u_int *sy)
 	*sy = (w->sy > inset) ? w->sy - inset : 1;
 }
 
+/*
+ * Resize a window to hold a layout. The inverse of layout_window_area: the
+ * layout does not cover the border kept at the window edge, so the window is
+ * that much bigger than its root cell. Every layout that sets its own size
+ * goes through this, so none of them can forget the border.
+ */
+void
+layout_fit_window(struct window *w, struct layout_cell *lc)
+{
+	u_int	 inset = 2 * LAYOUT_BORDER;
+
+	window_resize(w, lc->g.sx + inset, lc->g.sy + inset, -1, -1);
+}
+
 /* Create a new layout cell. */
 struct layout_cell *
 layout_create_cell(struct layout_cell *lcparent)

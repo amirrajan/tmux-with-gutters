@@ -124,16 +124,6 @@ layout_set_previous(struct window *w)
 }
 
 /*
- * A layout covers the window less the border at the window edge, so a window
- * holding a layout of this size is this much bigger.
- */
-static u_int
-layout_set_window_size(u_int size)
-{
-	return (size + 2 * LAYOUT_BORDER);
-}
-
-/*
  * The smallest layout that fits n cells along one axis: every cell needs
  * PANE_MINIMUM of its own, and each boundary between two of them costs
  * LAYOUT_SEPARATOR because both panes draw their own border.
@@ -232,8 +222,7 @@ layout_set_even(struct window *w, enum layout_type type)
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
-	window_resize(w, layout_set_window_size(lcroot->g.sx),
-	    layout_set_window_size(lcroot->g.sy), -1, -1);
+	layout_fit_window(w, lcroot);
 	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
@@ -348,8 +337,7 @@ layout_set_main_h(struct window *w)
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
-	window_resize(w, layout_set_window_size(lcroot->g.sx),
-	    layout_set_window_size(lcroot->g.sy), -1, -1);
+	layout_fit_window(w, lcroot);
 	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
@@ -452,8 +440,7 @@ layout_set_main_h_mirrored(struct window *w)
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
-	window_resize(w, layout_set_window_size(lcroot->g.sx),
-	    layout_set_window_size(lcroot->g.sy), -1, -1);
+	layout_fit_window(w, lcroot);
 	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
@@ -556,8 +543,7 @@ layout_set_main_v(struct window *w)
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
-	window_resize(w, layout_set_window_size(lcroot->g.sx),
-	    layout_set_window_size(lcroot->g.sy), -1, -1);
+	layout_fit_window(w, lcroot);
 	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
@@ -661,8 +647,7 @@ layout_set_main_v_mirrored(struct window *w)
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
-	window_resize(w, layout_set_window_size(lcroot->g.sx),
-	    layout_set_window_size(lcroot->g.sy), -1, -1);
+	layout_fit_window(w, lcroot);
 	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
@@ -792,8 +777,7 @@ layout_set_tiled(struct window *w)
 
 	layout_print_cell(w->layout_root, __func__, 1);
 
-	window_resize(w, layout_set_window_size(lcroot->g.sx),
-	    layout_set_window_size(lcroot->g.sy), -1, -1);
+	layout_fit_window(w, lcroot);
 	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
