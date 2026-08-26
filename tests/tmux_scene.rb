@@ -33,24 +33,28 @@ class TmuxScene
     'LC_ALL' => 'C.UTF-8'
   }.freeze
 
-  # Shell run inside every pane. The prompt is emptied so that the fill is the
-  # only pane content.
-  SHELL = '/bin/zsh'.freeze
+  # Shell the panes start with. Nothing is typed into it any more, so it only
+  # has to exist; fill-pane writes into the pane directly.
+  SHELL = '/bin/sh'.freeze
 
-  # Fills a pane with exactly rows*cols dots. stty reports that pane's own pty
-  # size, so the same command fills a pane of any size. The typed command line
-  # wraps over several rows, so the fill scrolls the pane and ends on its last
-  # cell, leaving every row full of dots. The shell is then replaced by sleep,
-  # because returning to the shell would emit a newline for the next prompt and
-  # scroll a row of dots away.
-  FILL = 'set -- $(stty size); printf "%$(($1*$2))s" "" | tr " " .; ' \
-         'exec sleep 1000'.freeze
+  # Command run in every pane. It draws nothing and does not exit, so whatever
+  # is written into the pane by fill-pane stays there.
+  IDLE = 'exec sleep 1000'.freeze
+
+  # Character panes are filled with.
+  PANE_CHAR = '.'.freeze
 
   # Default seconds to wait for tmux to settle after a command. Each scene can
   # override it, because how long a scene needs depends on what it does: an
   # ordinary redraw is quick, while putting a pane into a mode is not. The
   # environment variable is a convenience for sweeping the whole suite.
   DEFAULT_DELAY = Float(ENV.fetch('SCENE_DELAY', '0.05'))
+
+  # Set SCENE_DEBUG=1 to trace what the scene does to stderr: every tmux command
+  # and its output, the sizes at each step, and how the outer pane is fitted to
+  # the inner client. Rendering problems are usually a sizing or a timing
+  # problem, and both are invisible from the assertion alone.
+  DEBUG = !ENV['SCENE_DEBUG'].to_s.empty?
 
   attr_reader :width, :height, :captured, :delay
 
@@ -86,9 +90,11 @@ class TmuxScene
     @started = true
     at_exit { stop }
 
+    debug "start: conf=#{@conf.split("\n").inspect} delay=#{delay}"
     inner('new', '-d', '-x', width.to_s, '-y', height.to_s)
     inner('resizew', '-x', width.to_s, '-y', height.to_s)
     settle(1)
+    debug_layout("start")
     self
   end
 
@@ -96,6 +102,7 @@ class TmuxScene
   def split_window(*args)
     inner('split-window', *args)
     settle(1)
+    debug_layout("split-window #{args.join(' ')}")
     self
   end
 
@@ -114,14 +121,10 @@ class TmuxScene
 
   # Fill every pane with dots. synchronize-panes sends the setup to all panes at
   # once, so this works whatever the layout is.
-  def fill_panes
-    inner('setw', 'synchronize-panes', 'on')
-    send_line("export PROMPT=''")
-    send_line('reset')
-    settle(1)
-    send_line(FILL)
-    settle(2)
-    inner('setw', 'synchronize-panes', 'off')
+  def fill_panes(char = PANE_CHAR)
+    blank_panes
+    inner('fill-pane', '-a', char)
+    debug_layout("fill-panes")
     self
   end
 
@@ -129,11 +132,9 @@ class TmuxScene
   # longer running a shell by then (fill_panes replaces it with sleep), so each
   # one is respawned with the fill command instead of being typed into. tmux
   # runs the command through a shell, and stty reports the pane's new size.
-  def refill_panes
-    pane_indexes.each do |index|
-      inner('respawn-pane', '-k', "-t:.#{index}", FILL)
-    end
-    settle(2)
+  def refill_panes(char = PANE_CHAR)
+    inner('fill-pane', '-a', char)
+    debug_layout("refill-panes")
     self
   end
 
@@ -159,9 +160,10 @@ class TmuxScene
   # that draws nothing and does not exit.
   def blank_panes
     pane_indexes.each do |index|
-      inner('respawn-pane', '-k', "-t:.#{index}", 'exec sleep 1000')
+      inner('respawn-pane', '-k', "-t:.#{index}", IDLE)
     end
-    settle(1)
+    wait_until('panes to be idle') { pane_commands.all?('sleep') }
+    debug_layout("blank-panes")
     self
   end
 
@@ -176,8 +178,10 @@ class TmuxScene
     outer('set', '-g', 'status', 'off')
     outer('set', '-g', 'window-size', 'manual')
     outer('set', '-g', 'default-terminal', 'tmux-256color')
+    fit_outer_pane
     outer('send', '-l', "#{@tmux} -L#{@inner_socket} -f#{@conf_path} attach")
     outer('send', 'Enter')
+    wait_for_client
     settle(2)
     @attached = true
     self
@@ -198,6 +202,8 @@ class TmuxScene
     attach
     @captured = outer('capturep', '-p')
     @captured += "\n" unless @captured.empty? || @captured.end_with?("\n")
+    debug "capture: #{@captured.split("\n").size} row(s), " \
+          "widths=#{@captured.split("\n").map(&:length).uniq.inspect}"
     @captured
   end
 
@@ -221,6 +227,13 @@ class TmuxScene
   def window_summary
     inner('display', '-p',
           '#{window_width}x#{window_height} panes=#{window_panes}')
+  end
+
+  # The layout tree as tmux writes it out: sizes, offsets and nesting. Says
+  # what the layout believes, where the pane rectangles only say what came out
+  # of it.
+  def layout_string
+    inner('display', '-p', '#{window_layout}')
   end
 
   # The values of the options a border test cares about, for failure messages.
@@ -255,11 +268,84 @@ class TmuxScene
     sleep(delay * n)
   end
 
+  # Print a trace line when SCENE_DEBUG is set.
+  def debug(message)
+    return unless DEBUG
+
+    warn "[scene #{width}x#{height}] #{message}"
+  end
+
+  # Trace a structural change: both the resulting pane rectangles and the
+  # layout tree they came from.
+  def debug_layout(what)
+    return unless DEBUG
+
+    debug "#{what}: geometry=#{geometry.inspect}"
+    debug "#{what}: layout=#{layout_string}"
+  end
+
   private
 
-  def send_line(text)
-    inner('send', '-l', text)
-    inner('send', 'Enter')
+  # The inner client is only as big as the outer pane it runs in, and the outer
+  # pane is not necessarily the size of the outer window: the outer tmux is the
+  # same binary under test, so anything it reserves for its own borders comes
+  # out of the pane. Grow the outer window until its pane is exactly the size
+  # this scene asked for, rather than assuming a particular amount.
+  def fit_outer_pane
+    3.times do |attempt|
+      pane_x, pane_y = outer('display', '-p',
+                             '#{pane_width} #{pane_height}').split.map(&:to_i)
+      window_x, window_y = outer('display', '-p',
+                                 '#{window_width} #{window_height}')
+                           .split.map(&:to_i)
+      debug "fit outer (#{attempt}): window=#{window_x}x#{window_y} " \
+            "pane=#{pane_x}x#{pane_y} wanted pane=#{width}x#{height}"
+      return if pane_x == width && pane_y == height
+
+      grow_x = window_x + width - pane_x
+      grow_y = window_y + height - pane_y
+      debug "fit outer (#{attempt}): resizing window to #{grow_x}x#{grow_y}"
+      outer('resizew', '-x', grow_x.to_s, '-y', grow_y.to_s)
+      settle(1)
+    end
+
+    pane = outer('display', '-p', '#{pane_width}x#{pane_height}')
+    raise "outer pane is #{pane}, wanted #{width}x#{height}"
+  end
+
+  # Poll until the block is true. Everything this waits for is a state tmux can
+  # be asked about, so there is no need to guess how long a step takes.
+  def wait_until(what, timeout: 5)
+    deadline = Time.now + timeout
+    tries = 0
+
+    loop do
+      tries += 1
+      if yield
+        debug "waited for #{what}: #{tries} poll(s)"
+        return
+      end
+      raise "timed out after #{timeout}s waiting for #{what}" \
+        if Time.now > deadline
+
+      sleep 0.02
+    end
+  end
+
+  # The command running in each pane, in list-panes order.
+  def pane_commands
+    inner('list-panes', '-F', '#{pane_current_command}').split("\n")
+  end
+
+  # Wait until the inner server has a client of the size this scene asked for.
+  # Attaching runs a command in the outer pane, so how long it takes depends on
+  # the machine rather than on anything the test controls; without this the
+  # capture can catch the command line still on screen.
+  def wait_for_client
+    wait_until("an inner client of #{width}x#{height}") do
+      inner('list-clients', '-F', '#{client_width}x#{client_height}')
+        .split("\n").include?("#{width}x#{height}")
+    end
   end
 
   def inner(*args)
@@ -281,11 +367,20 @@ class TmuxScene
   # A failing tmux command is a test error, not a quiet empty string.
   def run(*args)
     out, status = Open3.capture2e(CHILD_ENV, *args, unsetenv_others: true)
+    result = out.sub(/\n\z/, '')
+
+    if DEBUG
+      # The socket argument is noise; show the command and what came back.
+      shown = args.drop(1).reject { |a| a.start_with?('-L', '-f') }
+      warn "[scene #{width}x#{height}]   $ #{shown.join(' ')}" \
+           "#{result.empty? ? '' : " -> #{result.inspect}"}"
+    end
+
     unless status.success?
       raise "command failed: #{args.join(' ')}\n#{out}"
     end
 
-    out.sub(/\n\z/, '')
+    result
   end
 end
 
