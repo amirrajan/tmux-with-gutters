@@ -55,6 +55,18 @@ class DisplayPanesParityTest < Minitest::Test
   # Arrow glyphs redraw_mark_border_arrows draws, one per side.
   ARROWS = %w[↑ ↓ ← →].freeze
 
+  # Where each arrow is, as "row,column glyph" lines. Comparing positions and
+  # not just presence is the point: the arrows are anchored one cell in from the
+  # box's top left corner, so a renderer that centres them on each side, or that
+  # uses the pane's zoomed position instead of its box, still draws four.
+  def arrow_positions(capture)
+    capture.split("\n").each_with_index.flat_map { |line, row|
+      line.chars.each_with_index.filter_map { |char, col|
+        "#{row},#{col} #{char}" if ARROWS.include?(char)
+      }
+    }.join("\n")
+  end
+
   def setup
     skip "no #{TmuxScene::SHELL}" unless TmuxScene.supported?
     @scene = nil
@@ -231,23 +243,54 @@ class DisplayPanesParityTest < Minitest::Test
       set -w -g pane-border-lines single
       set -g pane-border-indicators arrows
     CONF
+    @scene.cmd('select-pane', '-t1')
 
     normal = @scene.capture
-    drawn = ARROWS.select { |arrow| normal.include?(arrow) }
+    want = arrow_positions(normal)
 
-    refute_empty drawn,
-                 "pane-border-indicators arrows draws no arrows at all\n\n" \
-                 "#{normal}"
+    # All four sides of the active pane's box, so a fix that draws only the
+    # sides the overlay happens to own passes nothing.
+    assert_equal 4, want.split("\n").size,
+                 "the active pane's box does not have four arrows to " \
+                 "compare\n\n#{normal}"
 
     @scene.display_panes
     overlaid = @scene.capture
     assert_overlay_drawn overlaid
 
-    missing = drawn.reject { |arrow| overlaid.include?(arrow) }
+    assert_equal want, arrow_positions(overlaid),
+                 "display-panes moved or dropped the indicator arrows\n\n" \
+                 "normal:\n#{normal}\noverlay:\n#{overlaid}"
+  end
 
-    assert_empty missing,
-                 "display-panes dropped the indicator arrows " \
-                 "#{missing.join(' ')}\n\nnormal:\n#{normal}\n" \
-                 "overlay:\n#{overlaid}"
+  # The active pane in the middle of three columns: its top and bottom arrows
+  # are on the window edge, which screen-redraw.c draws, and its left and right
+  # arrows are inside the overlay's own screen. One test either side of the seam
+  # is what the two pane case above cannot give.
+  def test_the_overlay_draws_arrows_either_side_of_the_window_edge
+    @scene = TmuxScene.new(width: 26, height: 8, delay: 0.5, conf: <<~CONF).start
+      set -w -g pane-border-lines single
+      set -g pane-border-indicators arrows
+    CONF
+    @scene.split_window('-h')
+    @scene.split_window('-h')
+    @scene.cmd('select-layout', 'even-horizontal')
+    @scene.cmd('select-pane', '-t1')
+    @scene.blank_panes
+
+    normal = @scene.capture
+    want = arrow_positions(normal)
+
+    assert_equal 4, want.split("\n").size,
+                 "the active pane's box does not have four arrows to " \
+                 "compare\n\n#{normal}"
+
+    @scene.display_panes
+    overlaid = @scene.capture
+    assert_overlay_drawn overlaid
+
+    assert_equal want, arrow_positions(overlaid),
+                 "display-panes moved or dropped the indicator arrows\n\n" \
+                 "normal:\n#{normal}\noverlay:\n#{overlaid}"
   end
 end

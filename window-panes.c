@@ -680,6 +680,81 @@ window_panes_draw_pane_status(struct window_panes_modedata *data,
 	}
 }
 
+/* Draw one arrow glyph into a border cell of the overlay. */
+static void
+window_panes_draw_arrow(struct screen_write_ctx *ctx, struct grid_cell *gc,
+	int x, int y, char ch)
+{
+	struct grid_cell	arrow_gc;
+
+	memcpy(&arrow_gc, gc, sizeof arrow_gc);
+	utf8_set(&arrow_gc.data, ch);
+	screen_write_cursormove(ctx, x, y, 0);
+	screen_write_cell(ctx, &arrow_gc);
+}
+
+/*
+ * Draw the indicator arrows on the active pane's box, the way
+ * redraw_mark_border_arrows and redraw_draw_border_arrow do it outside the
+ * overlay: one arrow per side, one cell in from the box's top left corner,
+ * pointing at the pane. The glyphs are the ACS characters the real borders use,
+ * so a terminal without them degrades the same way.
+ *
+ * A side of the box that is on the window edge is not the overlay's to draw, so
+ * its arrow is off this screen and is skipped here; screen-redraw.c marks that
+ * one from the same layout.
+ */
+static void
+window_panes_draw_pane_arrows(struct window_panes_modedata *data,
+    struct screen_write_ctx *ctx, struct window *w, u_int osx, u_int osy,
+    u_int dsx, u_int dsy)
+{
+	struct window_pane	*wp = w->active;
+	struct layout_cell	*lc;
+	struct grid_cell	 arrow_gc;
+	int			 ind, x, y, x2, y2, ax, ay;
+
+	ind = options_get_number(w->options, "pane-border-indicators");
+	if (ind != PANE_BORDER_ARROWS && ind != PANE_BORDER_BOTH)
+		return;
+	if (wp == NULL || !window_panes_pane_visible(wp))
+		return;
+
+	lc = wp->saved_layout_cell;
+	if (lc == NULL)
+		lc = wp->layout_cell;
+	if (lc == NULL)
+		return;
+
+	x = window_panes_map_x(lc->g.xoff, osx, dsx) - LAYOUT_BORDER;
+	y = window_panes_map_y(lc->g.yoff, osy, dsy) - LAYOUT_BORDER;
+	x2 = window_panes_map_x(lc->g.xoff + lc->g.sx, osx, dsx);
+	y2 = window_panes_map_y(lc->g.yoff + lc->g.sy, osy, dsy);
+
+	/* The anchor is one cell in from the corner, as it is outside. */
+	ax = x + 1 + LAYOUT_BORDER;
+	ay = y + 1 + LAYOUT_BORDER;
+
+	window_panes_get_border_style(data, w, wp, &arrow_gc);
+	arrow_gc.attr |= GRID_ATTR_CHARSET;
+
+	log_debug("%s: pane %%%u box %d,%d-%d,%d arrows at %d,%d", __func__,
+	    wp->id, x, y, x2, y2, ax, ay);
+
+	if (ax >= 0 && (u_int)ax < dsx) {
+		if (y >= 0 && (u_int)y < dsy)
+			window_panes_draw_arrow(ctx, &arrow_gc, ax, y, '.');
+		if (y2 >= 0 && (u_int)y2 < dsy)
+			window_panes_draw_arrow(ctx, &arrow_gc, ax, y2, '-');
+	}
+	if (ay >= 0 && (u_int)ay < dsy) {
+		if (x >= 0 && (u_int)x < dsx)
+			window_panes_draw_arrow(ctx, &arrow_gc, x, ay, '+');
+		if (x2 >= 0 && (u_int)x2 < dsx)
+			window_panes_draw_arrow(ctx, &arrow_gc, x2, ay, ',');
+	}
+}
+
 static void
 window_panes_draw_floating_border(struct window_panes_modedata *data,
     struct screen_write_ctx *ctx, struct window *w, struct window_pane *wp,
@@ -931,6 +1006,7 @@ window_panes_draw_screen(struct window_mode_entry *wme)
 	}
 	window_panes_draw_borders(data, &ctx, w, root, osx, osy, sx, sy);
 	window_panes_draw_pane_status(data, &ctx, w, osx, osy, sx, sy);
+	window_panes_draw_pane_arrows(data, &ctx, w, osx, osy, sx, sy);
 	TAILQ_FOREACH_REVERSE(wp, &w->z_index, window_panes_zindex, zentry) {
 		if (!window_panes_pane_floating(wp))
 			continue;

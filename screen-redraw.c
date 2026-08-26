@@ -682,10 +682,15 @@ redraw_mark_border_status(struct redraw_build_ctx *bctx, struct window_pane *wp,
 	}
 }
 
-/* Mark existing border cells where indicator arrows will be drawn. */
+/*
+ * Mark existing border cells where indicator arrows will be drawn. The anchor
+ * is one cell in from the pane's top left corner, and is given by the caller
+ * rather than taken from wp->xoff: a pane hidden under the display-panes
+ * overlay is zoomed, and a pane with a scrollbar has its box moved out.
+ */
 static void
-redraw_mark_border_arrows(struct redraw_build_ctx *bctx, struct window_pane *wp,
-    int left, int right, int top, int bottom)
+redraw_mark_border_arrows(struct redraw_build_ctx *bctx, int left, int right,
+    int top, int bottom, int ax, int ay)
 {
 	struct redraw_build_cell	*bc;
 	u_int				 x, y;
@@ -694,7 +699,7 @@ redraw_mark_border_arrows(struct redraw_build_ctx *bctx, struct window_pane *wp,
 	if (bctx->ind != PANE_BORDER_ARROWS && bctx->ind != PANE_BORDER_BOTH)
 		return;
 
-	wx = wp->xoff + 1;
+	wx = ax;
 	if (wx >= left && wx <= right) {
 		wy = top;
 		if (redraw_window_to_scene(bctx, wx, wy, &x, &y)) {
@@ -710,7 +715,7 @@ redraw_mark_border_arrows(struct redraw_build_ctx *bctx, struct window_pane *wp,
 		}
 	}
 
-	wy = wp->yoff + 1;
+	wy = ay;
 	if (wy >= top && wy <= bottom) {
 		wx = left;
 		if (redraw_window_to_scene(bctx, wx, wy, &x, &y)) {
@@ -849,6 +854,8 @@ redraw_mark_overlay_borders(struct redraw_build_ctx *bctx,
 	 */
 	redraw_mark_border_status(bctx, wp, left, right, top, bottom,
 	    window_get_pane_status(bctx->w));
+	redraw_mark_border_arrows(bctx, left, right, top, bottom,
+	    (int)lc->g.xoff + 1, (int)lc->g.yoff + 1);
 }
 
 /* Mark pane borders. */
@@ -925,7 +932,8 @@ redraw_mark_pane_borders(struct redraw_build_ctx *bctx, struct window_pane *wp,
 
 	redraw_mark_border_status(bctx, wp, left, right, top, bottom,
 	    window_pane_get_pane_status(wp));
-	redraw_mark_border_arrows(bctx, wp, left, right, top, bottom);
+	redraw_mark_border_arrows(bctx, left, right, top, bottom, wp->xoff + 1,
+	    wp->yoff + 1);
 }
 
 /*
