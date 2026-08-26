@@ -1216,6 +1216,16 @@ layout_resize_child_cells(struct window *w, struct layout_cell *lc)
 	else if (lc->type == LAYOUT_TOPBOTTOM)
 		available = lc->g.sy;
 
+	/*
+	 * prev is the size the children currently add up to including the
+	 * separators between them, available is what they have to fit into.
+	 * Each child then takes a share of available and gives back its own
+	 * size plus one separator.
+	 */
+	log_debug("%s: %s count=%u prev=%u available=%u", __func__,
+	    lc->type == LAYOUT_LEFTRIGHT ? "LEFTRIGHT" : "TOPBOTTOM", count,
+	    prev, available);
+
 	/* Resize children into the new size. */
 	idx = 0;
 	TAILQ_FOREACH(lcchild, &lc->cells, entry) {
@@ -1377,6 +1387,14 @@ layout_split_pane(struct window_pane *wp, enum layout_type type, int size,
 	 * split, size1 is the size of the top/left and size2 the bottom/right.
 	 */
 	layout_split_sizes(lc, size, before, type, &size1, &size2, &saved_size);
+
+	/*
+	 * The two sizes plus the separator between them must add up to the cell
+	 * being split, so this is where a split gains or loses a cell.
+	 */
+	log_debug("%s: %s cell %ux%u requested=%d -> size1=%u size2=%u",
+	    __func__, type == LAYOUT_LEFTRIGHT ? "LEFTRIGHT" : "TOPBOTTOM",
+	    sx, sy, size, size1, size2);
 
 	/* Which size are we using? */
 	if (flags & SPAWN_BEFORE)
@@ -1563,6 +1581,16 @@ layout_spread_cell(struct window *w, struct layout_cell *parent)
 	 * distributed.
 	 */
 	remainder = size - (number * (each + 1)) + 1;
+
+	/*
+	 * This is where uneven space is handed out, so log the arithmetic: a
+	 * cell that comes out one too small or one too large is almost always
+	 * a disagreement between size, the separators counted in each, and the
+	 * remainder handed to the cells that come later.
+	 */
+	log_debug("%s: %s size=%u number=%u each=%u remainder=%u", __func__,
+	    parent->type == LAYOUT_LEFTRIGHT ? "LEFTRIGHT" : "TOPBOTTOM", size,
+	    number, each, remainder);
 
 	changed = 0;
 	TAILQ_FOREACH (lc, &parent->cells, entry) {
