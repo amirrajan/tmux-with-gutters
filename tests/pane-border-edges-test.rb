@@ -518,24 +518,25 @@ class PaneBorderEdgesTest < Minitest::Test
     @scene.display_panes
     @scene.capture
 
-    # The overlay pane covers the whole window and is boxed like any other
-    # pane, so the ring of cells on the window edge is its own box rather than
-    # the outer sides of the four panes: the same cells, drawn as one box. The
-    # overlay draws the miniature inside that box, which is where the four
-    # panes' facing borders and all of their content land.
+    # The overlay pane covers the whole window, so the ring of cells on the
+    # window edge is drawn by screen-redraw.c rather than by the overlay. It is
+    # drawn from the layout the overlay hides, not from the overlay pane's own
+    # box, so it is the outer sides of the four panes and the picture is the
+    # same as without the overlay. Everything inside the ring is the overlay:
+    # the four panes' facing borders and all of their content.
     assert_scene @scene, <<~WANT
-      ┌──────────────────────┐
+      ┌──────────┐┌──────────┐
       │......10x4││......10x4│
       │..........││..........│
       │....0.....││....1.....│
       │..........││..........│
-      │──────────┘└──────────│
-      │──────────┐┌──────────│
+      └──────────┘└──────────┘
+      ┌──────────┐┌──────────┐
       │......10x4││......10x4│
       │..........││..........│
       │....2.....││....3.....│
       │..........││..........│
-      └──────────────────────┘
+      └──────────┘└──────────┘
     WANT
 
     assert @scene.alive?, 'inner server died'
@@ -774,24 +775,24 @@ class PaneBorderEdgesTest < Minitest::Test
 
     @scene.display_panes
 
-    # The ring on the window edge is the box of the pane the overlay is a mode
-    # of, which is the active pane, so it is the active border style. Every
-    # border inside it is drawn by the overlay, and each one carries the style
-    # of the pane it belongs to: the active pane's box is A, the other three
-    # are I.
+    # Every border cell carries the style of the pane whose box it belongs to,
+    # whichever renderer draws it: the overlay draws the borders inside the
+    # window edge, and screen-redraw.c draws the ring on the edge from the same
+    # layout, so the active pane's box is A on all four of its own sides and the
+    # other three panes are I.
     assert_style_map @scene, <<~STYLES, 41 => 'A', 44 => 'I', 49 => 'b'
-      AAAAAAAAAAAAAAAAAAAAAAAA
-      AbbbbbbbbbbAIbbbbbbbbbbA
-      AbbbbbbbbbbAIbbbbbbbbbbA
-      AbbbbbbbbbbAIbbbbbbbbbbA
-      AbbbbbbbbbbAIbbbbbbbbbbA
-      AAAAAAAAAAAAIIIIIIIIIIIA
-      AIIIIIIIIIIIIIIIIIIIIIIA
-      AbbbbbbbbbbIIbbbbbbbbbbA
-      AbbbbbbbbbbIIbbbbbbbbbbA
-      AbbbbbbbbbbIIbbbbbbbbbbA
-      AbbbbbbbbbbIIbbbbbbbbbbA
-      AAAAAAAAAAAAAAAAAAAAAAAA
+      AAAAAAAAAAAAIIIIIIIIIIII
+      AbbbbbbbbbbAIbbbbbbbbbbI
+      AbbbbbbbbbbAIbbbbbbbbbbI
+      AbbbbbbbbbbAIbbbbbbbbbbI
+      AbbbbbbbbbbAIbbbbbbbbbbI
+      AAAAAAAAAAAAIIIIIIIIIIII
+      IIIIIIIIIIIIIIIIIIIIIIII
+      IbbbbbbbbbbIIbbbbbbbbbbI
+      IbbbbbbbbbbIIbbbbbbbbbbI
+      IbbbbbbbbbbIIbbbbbbbbbbI
+      IbbbbbbbbbbIIbbbbbbbbbbI
+      IIIIIIIIIIIIIIIIIIIIIIII
     STYLES
 
     assert @scene.alive?, 'inner server died'

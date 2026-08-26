@@ -225,6 +225,17 @@ struct redraw_build_ctx {
 
 	int					 ind;
 
+	/*
+	 * While the display-panes overlay is up the window is zoomed onto the
+	 * pane the overlay is drawn in, so the layout redraw would see is one
+	 * pane covering the window. These are that pane and the layout it
+	 * hides, so the borders on the window edge can be drawn from the panes
+	 * the overlay is a picture of instead of from the box of the overlay
+	 * pane itself.
+	 */
+	struct window_pane			*overlay_wp;
+	struct layout_cell			*overlay_root;
+
 	struct redraw_build_cell		*cells;
 };
 
@@ -290,6 +301,39 @@ redraw_get_window_offset(struct client *c, u_int *ox, u_int *oy, u_int *sx,
 		*sy = tty_sy;
 }
 
+/*
+ * Find the display-panes overlay, if it is up: a window zoomed onto a pane
+ * that is in window-panes mode. The overlay draws a picture of the whole
+ * window into that pane's screen, which stops one cell short of the window on
+ * every side, so the borders on the window edge are drawn here and have to
+ * come from the layout the overlay is a picture of.
+ */
+static void
+redraw_set_overlay(struct redraw_build_ctx *bctx)
+{
+	struct window			*w = bctx->w;
+	struct window_pane		*wp;
+	struct window_mode_entry	*wme;
+
+	if (w->saved_layout_root == NULL || (~w->flags & WINDOW_ZOOMED))
+		return;
+
+	TAILQ_FOREACH(wp, &w->panes, entry) {
+		if (~wp->flags & PANE_ZOOMED)
+			continue;
+		wme = TAILQ_FIRST(&wp->modes);
+		if (wme == NULL || wme->mode != &window_panes_mode)
+			continue;
+		bctx->overlay_wp = wp;
+		bctx->overlay_root = w->saved_layout_root;
+		log_debug("%s: overlay in pane %%%u, hidden layout %ux%u@%u,%u",
+		    __func__, wp->id, bctx->overlay_root->g.sx,
+		    bctx->overlay_root->g.sy, bctx->overlay_root->g.xoff,
+		    bctx->overlay_root->g.yoff);
+		return;
+	}
+}
+
 /* Initialize the context for building scene. */
 static void
 redraw_set_context(struct client *c, struct redraw_build_ctx *bctx)
@@ -303,6 +347,8 @@ redraw_set_context(struct client *c, struct redraw_build_ctx *bctx)
 	redraw_get_window_offset(c, &bctx->ox, &bctx->oy, &bctx->sx, &bctx->sy);
 
 	bctx->ind = options_get_number(w->options, "pane-border-indicators");
+
+	redraw_set_overlay(bctx);
 }
 
 /* Return a cell. */
@@ -524,11 +570,17 @@ redraw_data_has_pane(struct redraw_span_data *data, struct window_pane *wp)
  * Mark one border cell. If a non-border cell is marked as a border, replace
  * it. If it is already a border and this is not a floating pane, merge the
  * border mask and pane ownership.
+ *
+ * owner says where the pane is relative to this cell, as REDRAW_BORDER_* bits:
+ * a cell on the top border of a pane has the pane below it, so REDRAW_BORDER_D.
+ * The caller says which side it is drawing rather than this working it out from
+ * wp->xoff, because a pane hidden under the display-panes overlay is not where
+ * its geometry says it is.
  */
 static void
 redraw_mark_border_cell(struct redraw_build_ctx *bctx, int wx, int wy,
-    struct window_pane *wp, int top_owner, int bottom_owner, int mask,
-    enum pane_lines pane_lines, int floating)
+    struct window_pane *wp, int owner, int mask, enum pane_lines pane_lines,
+    int floating)
 {
 	struct redraw_build_cell	*bc;
 	u_int				 x, y;
@@ -562,23 +614,21 @@ redraw_mark_border_cell(struct redraw_build_ctx *bctx, int wx, int wy,
 		bc->data.type = REDRAW_SPAN_BORDER;
 	}
 
-	if (top_owner) {
+	if (owner & REDRAW_BORDER_U) {
 		bc->data.b.top_wp = wp;
 		bc->data.b.top_lines = pane_lines;
 	}
-	if (bottom_owner) {
+	if (owner & REDRAW_BORDER_D) {
 		bc->data.b.bottom_wp = wp;
 		bc->data.b.bottom_lines = pane_lines;
 	}
-
-	if (mask & (REDRAW_BORDER_U|REDRAW_BORDER_D)) {
-		if (wx < wp->xoff) {
-			bc->data.b.right_wp = wp;
-			bc->data.b.right_lines = pane_lines;
-		} else if (wx >= wp->xoff + (int)wp->sx) {
-			bc->data.b.left_wp = wp;
-			bc->data.b.left_lines = pane_lines;
-		}
+	if (owner & REDRAW_BORDER_L) {
+		bc->data.b.left_wp = wp;
+		bc->data.b.left_lines = pane_lines;
+	}
+	if (owner & REDRAW_BORDER_R) {
+		bc->data.b.right_wp = wp;
+		bc->data.b.right_lines = pane_lines;
 	}
 
 	mask |= bc->data.b.cell_mask;
@@ -675,18 +725,140 @@ redraw_mark_border_arrows(struct redraw_build_ctx *bctx, struct window_pane *wp,
 	}
 }
 
+/*
+ * Mark the four sides of one pane's box. marks says which sides are on screen,
+ * as REDRAW_BORDER_* bits: the left side is REDRAW_BORDER_L and so on.
+ */
+static void
+redraw_mark_border_box(struct redraw_build_ctx *bctx, struct window_pane *wp,
+    int left, int right, int top, int bottom, int marks,
+    enum pane_lines pane_lines, int floating)
+{
+	int	wx, wy, mask;
+
+	if (marks & REDRAW_BORDER_U) {
+		for (wx = left; wx <= right; wx++) {
+			mask = 0;
+			if (wx > left)
+				mask |= REDRAW_BORDER_L;
+			if (wx < right)
+				mask |= REDRAW_BORDER_R;
+			redraw_mark_border_cell(bctx, wx, top, wp,
+			    REDRAW_BORDER_D, mask, pane_lines, floating);
+		}
+	}
+	if (marks & REDRAW_BORDER_D) {
+		for (wx = left; wx <= right; wx++) {
+			mask = 0;
+			if (wx > left)
+				mask |= REDRAW_BORDER_L;
+			if (wx < right)
+				mask |= REDRAW_BORDER_R;
+			redraw_mark_border_cell(bctx, wx, bottom, wp,
+			    REDRAW_BORDER_U, mask, pane_lines, floating);
+		}
+	}
+	if (marks & REDRAW_BORDER_L) {
+		for (wy = top; wy <= bottom; wy++) {
+			mask = 0;
+			if (wy > top)
+				mask |= REDRAW_BORDER_U;
+			if (wy < bottom)
+				mask |= REDRAW_BORDER_D;
+			redraw_mark_border_cell(bctx, left, wy, wp,
+			    REDRAW_BORDER_R, mask, pane_lines, floating);
+		}
+	}
+	if (marks & REDRAW_BORDER_R) {
+		for (wy = top; wy <= bottom; wy++) {
+			mask = 0;
+			if (wy > top)
+				mask |= REDRAW_BORDER_U;
+			if (wy < bottom)
+				mask |= REDRAW_BORDER_D;
+			redraw_mark_border_cell(bctx, right, wy, wp,
+			    REDRAW_BORDER_L, mask, pane_lines, floating);
+		}
+	}
+}
+
+/*
+ * Mark the borders of the panes in the layout the display-panes overlay hides.
+ * The overlay pane covers the window, so only the cells on the window edge are
+ * still empty here; everything inside is the overlay's own screen and the
+ * overlay draws the borders there itself. Without this the ring on the window
+ * edge would be the overlay pane's own box, one continuous rectangle, and every
+ * corner where a hidden pane's box meets the window edge would be lost.
+ */
+static void
+redraw_mark_overlay_borders(struct redraw_build_ctx *bctx,
+    struct layout_cell *lc)
+{
+	struct layout_cell	*lcchild;
+	struct window_pane	*wp;
+	int			 left, right, top, bottom, marks = 0;
+
+	if (lc->flags & LAYOUT_CELL_FLOATING)
+		return;
+	if (lc->type != LAYOUT_WINDOWPANE) {
+		TAILQ_FOREACH(lcchild, &lc->cells, entry)
+			redraw_mark_overlay_borders(bctx, lcchild);
+		return;
+	}
+
+	/*
+	 * The overlay pane is in this layout too, in the place it had before it
+	 * was zoomed, and its border there is drawn like any other.
+	 */
+	wp = lc->wp;
+	if (wp == NULL)
+		return;
+
+	left = (int)lc->g.xoff - 1;
+	right = (int)(lc->g.xoff + lc->g.sx);
+	top = (int)lc->g.yoff - 1;
+	bottom = (int)(lc->g.yoff + lc->g.sy);
+
+	if (left >= 0)
+		marks |= REDRAW_BORDER_L;
+	if (top >= 0)
+		marks |= REDRAW_BORDER_U;
+	if (right <= (int)bctx->w->sx)
+		marks |= REDRAW_BORDER_R;
+	if (bottom <= (int)bctx->w->sy)
+		marks |= REDRAW_BORDER_D;
+
+	log_debug("%s: hidden pane %%%u box %d,%d-%d,%d marks 0x%x", __func__,
+	    wp->id, left, top, right, bottom, marks);
+
+	redraw_mark_border_box(bctx, wp, left, right, top, bottom, marks,
+	    window_pane_get_pane_lines(wp), 0);
+}
+
 /* Mark pane borders. */
 static void
 redraw_mark_pane_borders(struct redraw_build_ctx *bctx, struct window_pane *wp,
     int sb_w, int sb_left)
 {
 	enum pane_lines pane_lines = window_pane_get_pane_lines(wp);
-	int		left, right, top, bottom, wx, wy;
-	int		mark_top, mark_bottom, mark_left, mark_right, mask = 0;
+	int		left, right, top, bottom;
+	int		mark_top, mark_bottom, mark_left, mark_right, marks = 0;
 	int		floating = window_pane_is_floating(wp);
 
 	if (floating && pane_lines == PANE_LINES_NONE)
 		return;
+
+	/*
+	 * The pane the display-panes overlay is drawn in covers the window, so
+	 * its box would draw over the borders of the panes it hides. Those are
+	 * drawn instead by redraw_mark_overlay_borders, once every pane has
+	 * been marked.
+	 */
+	if (wp == bctx->overlay_wp) {
+		log_debug("%s: pane %%%u is the overlay, skipping its box",
+		    __func__, wp->id);
+		return;
+	}
 
 	left = wp->xoff - 1;
 	right = wp->xoff + wp->sx;
@@ -724,50 +896,16 @@ redraw_mark_pane_borders(struct redraw_build_ctx *bctx, struct window_pane *wp,
 		mark_bottom = (bottom <= (int)bctx->w->sy);
 	}
 
-	if (mark_top) {
-		for (wx = left; wx <= right; wx++) {
-			mask = 0;
-			if (wx > left)
-				mask |= REDRAW_BORDER_L;
-			if (wx < right)
-				mask |= REDRAW_BORDER_R;
-			redraw_mark_border_cell(bctx, wx, top, wp, 0, 1, mask,
-			    pane_lines, floating);
-		}
-	}
-	if (mark_bottom) {
-		for (wx = left; wx <= right; wx++) {
-			mask = 0;
-			if (wx > left)
-				mask |= REDRAW_BORDER_L;
-			if (wx < right)
-				mask |= REDRAW_BORDER_R;
-			redraw_mark_border_cell(bctx, wx, bottom, wp, 1, 0,
-			    mask, pane_lines, floating);
-		}
-	}
-	if (mark_left) {
-		for (wy = top; wy <= bottom; wy++) {
-			mask = 0;
-			if (wy > top)
-				mask |= REDRAW_BORDER_U;
-			if (wy < bottom)
-				mask |= REDRAW_BORDER_D;
-			redraw_mark_border_cell(bctx, left, wy, wp, 0, 0, mask,
-			    pane_lines, floating);
-		}
-	}
-	if (mark_right) {
-		for (wy = top; wy <= bottom; wy++) {
-			mask = 0;
-			if (wy > top)
-				mask |= REDRAW_BORDER_U;
-			if (wy < bottom)
-				mask |= REDRAW_BORDER_D;
-			redraw_mark_border_cell(bctx, right, wy, wp, 0, 0, mask,
-			    pane_lines, floating);
-		}
-	}
+	if (mark_left)
+		marks |= REDRAW_BORDER_L;
+	if (mark_right)
+		marks |= REDRAW_BORDER_R;
+	if (mark_top)
+		marks |= REDRAW_BORDER_U;
+	if (mark_bottom)
+		marks |= REDRAW_BORDER_D;
+	redraw_mark_border_box(bctx, wp, left, right, top, bottom, marks,
+	    pane_lines, floating);
 
 	redraw_mark_border_status(bctx, wp, left, right, top, bottom);
 	redraw_mark_border_arrows(bctx, wp, left, right, top, bottom);
@@ -962,6 +1100,8 @@ redraw_build_cells(struct redraw_build_ctx *bctx)
 
 	TAILQ_FOREACH_REVERSE(wp, &w->z_index, window_panes_zindex, zentry)
 		redraw_mark_pane(bctx, wp);
+	if (bctx->overlay_root != NULL)
+		redraw_mark_overlay_borders(bctx, bctx->overlay_root);
 	redraw_mark_two_pane_colours(bctx);
 	redraw_mark_menu(bctx);
 }
