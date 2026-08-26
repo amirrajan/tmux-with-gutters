@@ -590,6 +590,30 @@ module SceneAssertions
                  scene_report(scene, nil, message, expected)
   end
 
+  # Every pane, and the border it owns, must be inside the window: a pane at
+  # xoff spans xoff - 1 to xoff + sx, so the last of those must still be a
+  # cell of the window.
+  def assert_panes_inside_window(scene)
+    rows = scene.cmd('list-panes', '-F',
+                     '#{pane_index} #{pane_left} #{pane_top} ' \
+                     '#{pane_right} #{pane_bottom}').split("\n")
+    width, height = scene.cmd('display', '-p',
+                              '#{window_width} #{window_height}')
+                         .split.map(&:to_i)
+
+    rows.each do |row|
+      index, left, top, right, bottom = row.split.map(&:to_i)
+      inside = left >= 1 && top >= 1 && right <= width - 2 &&
+               bottom <= height - 2
+      assert inside,
+             "pane #{index} at #{left},#{top}-#{right},#{bottom} has no room " \
+             "for its border in a #{width}x#{height} window\n\n" \
+             "layout: #{scene.layout_string}\n" \
+             "geometry (index left top width height):\n" \
+             "#{indent(scene.geometry)}"
+    end
+  end
+
   private
 
   # Find the pane rectangles in a picture: every maximal run of pane cells must
