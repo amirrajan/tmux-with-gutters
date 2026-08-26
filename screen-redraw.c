@@ -606,7 +606,11 @@ redraw_mark_border_status(struct redraw_build_ctx *bctx, struct window_pane *wp,
 	else
 		wy = bottom;
 
-	sx = wp->xoff + 2;
+	/*
+	 * The status is drawn in the pane's own border, one cell in from each
+	 * corner so that it does not run into them.
+	 */
+	sx = wp->xoff + 1;
 	ex = right - 1;
 	if (sx > ex)
 		return;
