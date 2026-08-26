@@ -190,10 +190,15 @@ window_make_pane_status(struct window_pane *wp, struct client *c, u_int width,
 	char			*expanded;
 	u_int			 i;
 	enum pane_lines		 pane_lines;
-	int			 pane_status, cell_type;
+	int			 cell_type;
 
-	pane_status = window_pane_get_pane_status(wp);
-	if (pane_status == PANE_STATUS_OFF || width == 0)
+	/*
+	 * Whether this pane has a status line at all was decided when its border
+	 * cells were marked, which is where the width comes from: a pane hidden
+	 * under the display-panes overlay has one in the box the saved layout
+	 * gives it even though window_pane_get_pane_status suppresses its own.
+	 */
+	if (width == 0)
 		return (0);
 
 	ft = format_create(c, NULL, FORMAT_PANE|wp->id, FORMAT_STATUS);

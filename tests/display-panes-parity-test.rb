@@ -186,6 +186,44 @@ class DisplayPanesParityTest < Minitest::Test
     end
   end
 
+  # A title row on the window edge is marked and drawn by screen-redraw.c and
+  # one inside it by the overlay, so a window with a box in each place pins both
+  # halves against each other. The format is longer than a box is wide, which is
+  # the case the overlay has to truncate: it is a miniature, so the room between
+  # two corners can be less than the format asks for, and the two renderers have
+  # to cut it at the same cell.
+  def test_the_overlay_truncates_titles_where_the_real_borders_do
+    @scene = TmuxScene.new(width: 40, height: 12, delay: 0.5, conf: <<~CONF).start
+      set -w -g pane-border-lines single
+      set -g pane-border-status top
+      set -g pane-border-format " pane #P of a very long title "
+    CONF
+    @scene.split_window('-h')
+    @scene.split_window('-v')
+    @scene.cmd('select-pane', '-t0')
+    @scene.split_window('-v')
+    @scene.cmd('select-layout', 'tiled')
+    @scene.blank_panes
+
+    normal = @scene.capture.split("\n")
+
+    assert_includes normal[0], 'pane 0 of a very',
+                    "the title is not truncated at the box, so this window is " \
+                    "not testing truncation\n\n#{normal.join("\n")}"
+
+    @scene.display_panes
+    overlaid = @scene.capture
+    assert_overlay_drawn overlaid
+
+    # Row 0 is the top of the boxes on the window edge, row 6 the top of the
+    # boxes below them, which is inside the overlay's own screen.
+    [0, 6].each do |row|
+      assert_equal normal[row], overlaid.split("\n")[row],
+                   "display-panes drew border row #{row} differently\n\n" \
+                   "normal:\n#{normal.join("\n")}\noverlay:\n#{overlaid}"
+    end
+  end
+
   # pane-border-indicators arrows marks the active pane's box with one arrow per
   # side. The overlay redraws the borders and draws none of them.
   def test_the_overlay_draws_pane_border_indicator_arrows

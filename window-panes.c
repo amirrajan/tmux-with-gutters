@@ -603,6 +603,83 @@ window_panes_draw_borders(struct window_panes_modedata *data,
 	free(map);
 }
 
+/*
+ * Draw pane-border-format into the border row of each pane's box, the way the
+ * real borders draw it. The overlay is a miniature, so a box can be narrower
+ * than the format: format_draw is given the room between the two corners and
+ * truncates to it.
+ *
+ * Only the part inside the overlay's own screen is drawn here. Where a box's
+ * status row is on the window edge the cells belong to screen-redraw.c, which
+ * marks and draws them from the same layout.
+ */
+static void
+window_panes_draw_pane_status(struct window_panes_modedata *data,
+    struct screen_write_ctx *ctx, struct window *w, u_int osx, u_int osy,
+    u_int dsx, u_int dsy)
+{
+	struct session		*s = data->session;
+	struct window_pane	*wp;
+	struct layout_cell	*lc;
+	struct grid_cell	 bt_gc;
+	struct format_tree	*ft;
+	char			*expanded;
+	int			 status, x, y, x2, y2, left, right;
+
+	status = window_get_pane_status(w);
+	if (status != PANE_STATUS_TOP && status != PANE_STATUS_BOTTOM)
+		return;
+
+	TAILQ_FOREACH(wp, &w->panes, entry) {
+		if (!window_panes_pane_visible(wp))
+			continue;
+		lc = wp->saved_layout_cell;
+		if (lc == NULL)
+			lc = wp->layout_cell;
+		if (lc == NULL)
+			continue;
+
+		x = window_panes_map_x(lc->g.xoff, osx, dsx) - LAYOUT_BORDER;
+		x2 = window_panes_map_x(lc->g.xoff + lc->g.sx, osx, dsx);
+		if (status == PANE_STATUS_TOP) {
+			y = window_panes_map_y(lc->g.yoff, osy, dsy) -
+			    LAYOUT_BORDER;
+		} else {
+			y2 = window_panes_map_y(lc->g.yoff + lc->g.sy, osy, dsy);
+			y = y2;
+		}
+		if (y < 0 || (u_int)y >= dsy)
+			continue;
+
+		/*
+		 * One cell in from each corner, as the real borders do it: the
+		 * box spans x to x2, and redraw_mark_border_status gives the
+		 * status the cells from x + 2 to x2 - 1.
+		 */
+		left = x + 1 + LAYOUT_BORDER;
+		right = x2;
+		if (left < 0 || right <= left || (u_int)left >= dsx)
+			continue;
+		if ((u_int)right > dsx)
+			right = dsx;
+
+		ft = format_create_defaults(NULL, NULL, s, s->curw, wp);
+		expanded = format_expand_time(ft,
+		    options_get_string(wp->options, "pane-border-format"));
+		format_free(ft);
+
+		window_panes_get_border_style(data, w, wp, &bt_gc);
+		bt_gc.attr &= ~GRID_ATTR_CHARSET;
+
+		log_debug("%s: pane %%%u status row %d cols %d-%d: %s", __func__,
+		    wp->id, y, left, right, expanded);
+
+		screen_write_cursormove(ctx, left, y, 0);
+		format_draw(ctx, &bt_gc, right - left, expanded, NULL, 0);
+		free(expanded);
+	}
+}
+
 static void
 window_panes_draw_floating_border(struct window_panes_modedata *data,
     struct screen_write_ctx *ctx, struct window *w, struct window_pane *wp,
@@ -853,6 +930,7 @@ window_panes_draw_screen(struct window_mode_entry *wme)
 		window_panes_draw_pane(data, &ctx, wp, root, osx, osy, sx, sy);
 	}
 	window_panes_draw_borders(data, &ctx, w, root, osx, osy, sx, sy);
+	window_panes_draw_pane_status(data, &ctx, w, osx, osy, sx, sy);
 	TAILQ_FOREACH_REVERSE(wp, &w->z_index, window_panes_zindex, zentry) {
 		if (!window_panes_pane_floating(wp))
 			continue;

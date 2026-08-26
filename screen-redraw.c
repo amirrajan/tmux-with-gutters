@@ -642,13 +642,12 @@ redraw_mark_border_cell(struct redraw_build_ctx *bctx, int wx, int wy,
  */
 static void
 redraw_mark_border_status(struct redraw_build_ctx *bctx, struct window_pane *wp,
-    __unused int left, int right, int top, int bottom)
+    int left, int right, int top, int bottom, int pane_status)
 {
 	struct redraw_build_cell	*bc;
 	u_int				 x, y, off = 0;
-	int				 pane_status, wy, sx, ex, wx, cell_type;
+	int				 wy, sx, ex, wx, cell_type;
 
-	pane_status = window_pane_get_pane_status(wp);
 	if (pane_status == PANE_STATUS_OFF)
 		return;
 	if (pane_status == PANE_STATUS_TOP)
@@ -658,9 +657,12 @@ redraw_mark_border_status(struct redraw_build_ctx *bctx, struct window_pane *wp,
 
 	/*
 	 * The status is drawn in the pane's own border, one cell in from each
-	 * corner so that it does not run into them.
+	 * corner so that it does not run into them. The box is taken from the
+	 * caller rather than from wp->xoff, because a pane hidden under the
+	 * display-panes overlay is zoomed: its box is where the saved layout
+	 * puts it, not where the pane currently is.
 	 */
-	sx = wp->xoff + 1;
+	sx = left + 2;
 	ex = right - 1;
 	if (sx > ex)
 		return;
@@ -833,6 +835,20 @@ redraw_mark_overlay_borders(struct redraw_build_ctx *bctx,
 
 	redraw_mark_border_box(bctx, wp, left, right, top, bottom, marks,
 	    window_pane_get_pane_lines(wp), 0);
+
+	/*
+	 * The status line lives in this box's border, so the part of it on the
+	 * window edge is drawn here for the same reason the border is. The rest
+	 * is inside the overlay's own screen and the overlay draws it.
+	 */
+	/*
+	 * The status of a pane in this layout is the window's: the panes here are
+	 * ordinary tiled panes, while the pane the overlay is a mode of is zoomed
+	 * and has its own status suppressed, which would leave a hole in the ring
+	 * where its box has a title everywhere else.
+	 */
+	redraw_mark_border_status(bctx, wp, left, right, top, bottom,
+	    window_get_pane_status(bctx->w));
 }
 
 /* Mark pane borders. */
@@ -907,7 +923,8 @@ redraw_mark_pane_borders(struct redraw_build_ctx *bctx, struct window_pane *wp,
 	redraw_mark_border_box(bctx, wp, left, right, top, bottom, marks,
 	    pane_lines, floating);
 
-	redraw_mark_border_status(bctx, wp, left, right, top, bottom);
+	redraw_mark_border_status(bctx, wp, left, right, top, bottom,
+	    window_pane_get_pane_status(wp));
 	redraw_mark_border_arrows(bctx, wp, left, right, top, bottom);
 }
 
@@ -1690,31 +1707,12 @@ redraw_draw_menu_lines(struct redraw_draw_ctx *dctx)
 	}
 }
 
-/* Get line for pane status line. */
-static int
-redraw_pane_status_line(struct redraw_draw_ctx *dctx,
-    struct window_pane *wp, u_int *line)
-{
-	struct redraw_scene	*scene = dctx->scene;
-	int			 pane_status, wy;
-
-	pane_status = window_pane_get_pane_status(wp);
-	if (pane_status == PANE_STATUS_OFF)
-		return (0);
-
-	if (pane_status == PANE_STATUS_TOP)
-		wy = (int)wp->yoff - 1;
-	else
-		wy = (int)wp->yoff + wp->sy;
-	if (wy < 0 || wy < (int)scene->oy)
-		return (0);
-	if ((u_int)wy >= scene->oy + scene->sy)
-		return (0);
-	*line = wy - scene->oy;
-	return (1);
-}
-
-/* Get available width for pane status line. */
+/*
+ * Get available width for pane status line. The row is found from the spans
+ * that were marked for this pane rather than from wp->yoff: a pane hidden under
+ * the display-panes overlay is zoomed, so its status is in the border of the
+ * box the saved layout gives it and not next to the pane itself.
+ */
 static u_int
 redraw_pane_status_width(struct redraw_draw_ctx *dctx,
     struct window_pane *wp, struct redraw_span **first)
@@ -1723,18 +1721,20 @@ redraw_pane_status_width(struct redraw_draw_ctx *dctx,
 	struct redraw_span	*span;
 	u_int			 y, width = 0, end;
 
-	if (!redraw_pane_status_line(dctx, wp, &y))
-		return (0);
-
 	*first = NULL;
-	TAILQ_FOREACH(span, &scene->lines[y].spans[REDRAW_SPAN_STATUS], entry) {
-		if (span->data.st.wp == wp) {
+	for (y = 0; y < scene->sy; y++) {
+		TAILQ_FOREACH(span, &scene->lines[y].spans[REDRAW_SPAN_STATUS],
+		    entry) {
+			if (span->data.st.wp != wp)
+				continue;
 			if (*first == NULL)
-			    *first = span;
+				*first = span;
 			end = span->data.st.offset + span->width;
 			if (end > width)
 				width = end;
 		}
+		if (width != 0)
+			break;
 	}
 	return (width);
 }
