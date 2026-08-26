@@ -154,11 +154,12 @@ layout_check(struct layout_cell *lc)
 			}
 			if (!layout_check(lcchild))
 				return (0);
-			n += lcchild->g.sx + 1;
+			n += lcchild->g.sx + LAYOUT_SEPARATOR;
 		}
-		if (n - 1 != lc->g.sx) {
+		n -= LAYOUT_SEPARATOR;
+		if (n != lc->g.sx) {
 			log_debug("%s: LEFTRIGHT children and separators are "
-			    "%u wide, parent is %u", __func__, n - 1,
+			    "%u wide, parent is %u", __func__, n,
 			    lc->g.sx);
 			return (0);
 		}
@@ -174,11 +175,12 @@ layout_check(struct layout_cell *lc)
 			}
 			if (!layout_check(lcchild))
 				return (0);
-			n += lcchild->g.sy + 1;
+			n += lcchild->g.sy + LAYOUT_SEPARATOR;
 		}
-		if (n - 1 != lc->g.sy) {
+		n -= LAYOUT_SEPARATOR;
+		if (n != lc->g.sy) {
 			log_debug("%s: TOPBOTTOM children and separators are "
-			    "%u tall, parent is %u", __func__, n - 1,
+			    "%u tall, parent is %u", __func__, n,
 			    lc->g.sy);
 			return (0);
 		}
@@ -193,7 +195,7 @@ layout_parse(struct window *w, const char *layout, char **cause)
 {
 	struct layout_cell	*lcchild, *tiled_lc = NULL;
 	struct window_pane	*wp;
-	u_int			 npanes, ncells, sx = 0, sy = 0;
+	u_int			 npanes, ncells, sx = 0, sy = 0, usx, usy;
 	u_short			 csum;
 	int			 n = 0;
 
@@ -223,7 +225,9 @@ layout_parse(struct window *w, const char *layout, char **cause)
 		/* A stub layout cell for an empty window. */
 		tiled_lc = layout_create_cell(NULL);
 		tiled_lc->type = LAYOUT_LEFTRIGHT;
-		layout_set_size(tiled_lc, w->sx, w->sy, 0, 0);
+		layout_window_area(w, &usx, &usy);
+		layout_set_size(tiled_lc, usx, usy, LAYOUT_BORDER,
+		    LAYOUT_BORDER);
 	}
 	if (*layout != '\0') {
 		*cause = xstrdup("invalid layout");
@@ -261,21 +265,23 @@ layout_parse(struct window *w, const char *layout, char **cause)
 		break;
 	case LAYOUT_LEFTRIGHT:
 		TAILQ_FOREACH(lcchild, &tiled_lc->cells, entry) {
-			sy = lcchild->g.sy + 1;
-			sx += lcchild->g.sx + 1;
+			sy = lcchild->g.sy;
+			sx += lcchild->g.sx + LAYOUT_SEPARATOR;
 		}
+		sx -= LAYOUT_SEPARATOR;
 		break;
 	case LAYOUT_TOPBOTTOM:
 		TAILQ_FOREACH(lcchild, &tiled_lc->cells, entry) {
-			sx = lcchild->g.sx + 1;
-			sy += lcchild->g.sy + 1;
+			sx = lcchild->g.sx;
+			sy += lcchild->g.sy + LAYOUT_SEPARATOR;
 		}
+		sy -= LAYOUT_SEPARATOR;
 		break;
 	}
 	if (tiled_lc->type != LAYOUT_WINDOWPANE &&
 	    (tiled_lc->g.sx != sx || tiled_lc->g.sy != sy)) {
 		layout_print_cell(tiled_lc, __func__, 0);
-		tiled_lc->g.sx = sx - 1; tiled_lc->g.sy = sy - 1;
+		tiled_lc->g.sx = sx; tiled_lc->g.sy = sy;
 	}
 
 	/* Check the new layout. */
@@ -284,9 +290,9 @@ layout_parse(struct window *w, const char *layout, char **cause)
 		goto fail;
 	}
 
-	/* Resize window to the layout size. */
+	/* Resize window to the layout size, plus the border at its edge. */
 	if (sx != 0 && sy != 0)
-		window_resize(w, tiled_lc->g.sx, tiled_lc->g.sy, -1, -1);
+		layout_fit_window(w, tiled_lc);
 
 	/* Destroy the old layout and swap to the new. */
 	layout_free_cell(w->layout_root, 0);
