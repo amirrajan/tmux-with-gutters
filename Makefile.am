@@ -101,6 +101,7 @@ dist_tmux_SOURCES = \
 	cmd-detach-client.c \
 	cmd-display-menu.c \
 	cmd-display-message.c \
+	cmd-fill-pane.c \
 	cmd-find-window.c \
 	cmd-find.c \
 	cmd-if-shell.c \
