@@ -2152,31 +2152,28 @@ window_pane_find_up(struct window_pane *wp)
 {
 	struct window		*w;
 	struct window_pane	*next, *best, **list;
-	int			 edge, left, right, end, status, found;
+	int			 edge, left, right, end, found;
 	int			 xoff, yoff;
 	u_int			 size, sx, sy;
 
 	if (wp == NULL)
 		return (NULL);
 	w = wp->window;
-	status = window_get_pane_status(w);
 
 	list = NULL;
 	size = 0;
 
 	window_pane_full_size_offset(wp, &xoff, &yoff, &sx, &sy);
 
+	/*
+	 * The pane above ends LAYOUT_SEPARATOR cells before this one starts:
+	 * both panes draw their own border. A pane at the top edge wraps round
+	 * to the pane that ends at the bottom edge, which is LAYOUT_BORDER in
+	 * from the window edge.
+	 */
 	edge = yoff;
-	if (status == PANE_STATUS_TOP) {
-		if (edge == 1)
-			edge = (int)w->sy + 1;
-	} else if (status == PANE_STATUS_BOTTOM) {
-		if (edge == 0)
-			edge = (int)w->sy;
-	} else {
-		if (edge == 0)
-			edge = (int)w->sy + 1;
-	}
+	if (edge == LAYOUT_BORDER)
+		edge = (int)w->sy - LAYOUT_BORDER + LAYOUT_SEPARATOR;
 
 	left = xoff;
 	right = xoff + (int)sx;
@@ -2185,7 +2182,7 @@ window_pane_find_up(struct window_pane *wp)
 		window_pane_full_size_offset(next, &xoff, &yoff, &sx, &sy);
 		if (next == wp)
 			continue;
-		if (yoff + (int)sy + 1 != edge)
+		if (yoff + (int)sy + LAYOUT_SEPARATOR != edge)
 			continue;
 		end = xoff + (int)sx - 1;
 
@@ -2213,31 +2210,23 @@ window_pane_find_down(struct window_pane *wp)
 {
 	struct window		*w;
 	struct window_pane	*next, *best, **list;
-	int			 edge, left, right, end, status, found;
+	int			 edge, left, right, end, found;
 	int			 xoff, yoff;
 	u_int			 size, sx, sy;
 
 	if (wp == NULL)
 		return (NULL);
 	w = wp->window;
-	status = window_get_pane_status(w);
 
 	list = NULL;
 	size = 0;
 
 	window_pane_full_size_offset(wp, &xoff, &yoff, &sx, &sy);
 
-	edge = yoff + (int)sy + 1;
-	if (status == PANE_STATUS_TOP) {
-		if (edge >= (int)w->sy)
-			edge = 1;
-	} else if (status == PANE_STATUS_BOTTOM) {
-		if (edge >= (int)w->sy - 1)
-			edge = 0;
-	} else {
-		if (edge >= (int)w->sy)
-			edge = 0;
-	}
+	/* The pane below starts LAYOUT_SEPARATOR cells after this one ends. */
+	edge = yoff + (int)sy + LAYOUT_SEPARATOR;
+	if (edge >= (int)w->sy)
+		edge = LAYOUT_BORDER;
 
 	left = wp->xoff;
 	right = wp->xoff + (int)wp->sx;
@@ -2287,9 +2276,14 @@ window_pane_find_left(struct window_pane *wp)
 
 	window_pane_full_size_offset(wp, &xoff, &yoff, &sx, &sy);
 
+	/*
+	 * The pane to the left ends LAYOUT_SEPARATOR cells before this one
+	 * starts. A pane at the left edge wraps round to the pane that ends at
+	 * the right edge, which is LAYOUT_BORDER in from the window edge.
+	 */
 	edge = xoff;
-	if (edge == 0)
-		edge = (int)w->sx + 1;
+	if (edge == LAYOUT_BORDER)
+		edge = (int)w->sx - LAYOUT_BORDER + LAYOUT_SEPARATOR;
 
 	top = yoff;
 	bottom = yoff + (int)sy;
@@ -2298,7 +2292,7 @@ window_pane_find_left(struct window_pane *wp)
 		window_pane_full_size_offset(next, &xoff, &yoff, &sx, &sy);
 		if (next == wp)
 			continue;
-		if (xoff + (int)sx + 1 != edge)
+		if (xoff + (int)sx + LAYOUT_SEPARATOR != edge)
 			continue;
 		end = yoff + (int)sy - 1;
 
@@ -2339,9 +2333,10 @@ window_pane_find_right(struct window_pane *wp)
 
 	window_pane_full_size_offset(wp, &xoff, &yoff, &sx, &sy);
 
-	edge = xoff + (int)sx + 1;
+	/* The pane to the right starts LAYOUT_SEPARATOR cells after this ends. */
+	edge = xoff + (int)sx + LAYOUT_SEPARATOR;
 	if (edge >= (int)w->sx)
-		edge = 0;
+		edge = LAYOUT_BORDER;
 
 	top = wp->yoff;
 	bottom = wp->yoff + (int)wp->sy;
