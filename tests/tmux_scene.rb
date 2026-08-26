@@ -306,6 +306,12 @@ class TmuxScene
       grow_y = window_y + height - pane_y
       debug "fit outer (#{attempt}): resizing window to #{grow_x}x#{grow_y}"
       outer('resizew', '-x', grow_x.to_s, '-y', grow_y.to_s)
+
+      # Restart the shell in the pane so that it, and anything it runs, starts
+      # with the new terminal size. Resizing the pane resizes its pty, but a
+      # process started immediately afterwards can still read the old size,
+      # and then the inner client attaches at the wrong size.
+      outer('respawn-pane', '-k')
       settle(1)
     end
 
