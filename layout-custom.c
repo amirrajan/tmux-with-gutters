@@ -145,25 +145,43 @@ layout_check(struct layout_cell *lc)
 		break;
 	case LAYOUT_LEFTRIGHT:
 		TAILQ_FOREACH(lcchild, &lc->cells, entry) {
-			if (lcchild->g.sy != lc->g.sy)
+			if (lcchild->g.sy != lc->g.sy) {
+				log_debug("%s: child %ux%u is not as tall as "
+				    "its parent %ux%u", __func__,
+				    lcchild->g.sx, lcchild->g.sy, lc->g.sx,
+				    lc->g.sy);
 				return (0);
+			}
 			if (!layout_check(lcchild))
 				return (0);
 			n += lcchild->g.sx + 1;
 		}
-		if (n - 1 != lc->g.sx)
+		if (n - 1 != lc->g.sx) {
+			log_debug("%s: LEFTRIGHT children and separators are "
+			    "%u wide, parent is %u", __func__, n - 1,
+			    lc->g.sx);
 			return (0);
+		}
 		break;
 	case LAYOUT_TOPBOTTOM:
 		TAILQ_FOREACH(lcchild, &lc->cells, entry) {
-			if (lcchild->g.sx != lc->g.sx)
+			if (lcchild->g.sx != lc->g.sx) {
+				log_debug("%s: child %ux%u is not as wide as "
+				    "its parent %ux%u", __func__,
+				    lcchild->g.sx, lcchild->g.sy, lc->g.sx,
+				    lc->g.sy);
 				return (0);
+			}
 			if (!layout_check(lcchild))
 				return (0);
 			n += lcchild->g.sy + 1;
 		}
-		if (n - 1 != lc->g.sy)
+		if (n - 1 != lc->g.sy) {
+			log_debug("%s: TOPBOTTOM children and separators are "
+			    "%u tall, parent is %u", __func__, n - 1,
+			    lc->g.sy);
 			return (0);
+		}
 		break;
 	}
 	return (1);
@@ -179,19 +197,25 @@ layout_parse(struct window *w, const char *layout, char **cause)
 	u_short			 csum;
 	int			 n = 0;
 
+	log_debug("%s: @%u %ux%u: %s", __func__, w->id, w->sx, w->sy, layout);
+
 	/* Check validity. */
 	if (sscanf(layout, "%hx,%n", &csum, &n) != 1 || n != 5) {
+		log_debug("%s: no checksum", __func__);
 		*cause = xstrdup("invalid layout");
 		return (-1);
 	}
 	layout += n;
 	if (csum != layout_checksum(layout)) {
+		log_debug("%s: checksum is %04hx, wanted %04hx", __func__,
+		    layout_checksum(layout), csum);
 		*cause = xstrdup("invalid layout");
 		return (-1);
 	}
 
 	/* Build the layout. */
 	if (layout_construct(NULL, &layout, &tiled_lc) != 0) {
+		log_debug("%s: cells do not add up, see layout_check", __func__);
 		*cause = xstrdup("invalid layout");
 		return (-1);
 	}

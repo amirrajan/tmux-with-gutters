@@ -654,6 +654,10 @@ layout_set_tiled(struct window *w)
 	if (sy < w->sy)
 		sy = w->sy;
 
+	log_debug("%s: %u pane(s) in %ux%u window: rows=%u columns=%u "
+	    "width=%u height=%u grid=%ux%u", __func__, n, w->sx, w->sy, rows,
+	    columns, width, height, sx, sy);
+
 	layout_free(w, 1);
 	lcroot = w->layout_root = layout_create_cell(NULL);
 	layout_set_size(lcroot, sx, sy, 0, 0);
