@@ -677,13 +677,12 @@ redraw_mark_pane_borders(struct redraw_build_ctx *bctx, struct window_pane *wp,
     int sb_w, int sb_left)
 {
 	enum pane_lines pane_lines = window_pane_get_pane_lines(wp);
-	int		pane_status, left, right, top, bottom, wx, wy;
+	int		left, right, top, bottom, wx, wy;
 	int		mark_top, mark_bottom, mark_left, mark_right, mask = 0;
 	int		floating = window_pane_is_floating(wp);
 
 	if (floating && pane_lines == PANE_LINES_NONE)
 		return;
-	pane_status = window_pane_get_pane_status(wp);
 
 	left = wp->xoff - 1;
 	right = wp->xoff + wp->sx;
@@ -711,12 +710,14 @@ redraw_mark_pane_borders(struct redraw_build_ctx *bctx, struct window_pane *wp,
 		if (bottom >= (int)bctx->w->sy)
 			bottom = (int)bctx->w->sy - 1;
 	} else {
+		/*
+		 * Every pane is boxed on all four sides, so the side opposite
+		 * the status line is still the pane's own border and is still
+		 * drawn. The status is written into one of these borders by
+		 * redraw_mark_border_status below.
+		 */
 		mark_right = (right <= (int)bctx->w->sx);
 		mark_bottom = (bottom <= (int)bctx->w->sy);
-		if (pane_status == PANE_STATUS_TOP)
-			mark_bottom = 0;
-		else if (pane_status == PANE_STATUS_BOTTOM)
-			mark_top = 0;
 	}
 
 	if (mark_top) {

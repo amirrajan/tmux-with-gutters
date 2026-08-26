@@ -291,23 +291,6 @@ layout_cell_has_tiled_child(struct layout_cell *lc)
 	return (0);
 }
 
-static int
-layout_cell_is_first_tiled(struct layout_cell *lc)
-{
-	struct layout_cell      *lcchild, *lcparent = lc->parent;
-
-	if (lcparent == NULL)
-		return (layout_cell_is_tiled(lc));
-
-	TAILQ_FOREACH(lcchild, &lcparent->cells, entry) {
-		if (layout_cell_is_tiled(lcchild) ||
-		    layout_cell_has_tiled_child(lcchild))
-			break;
-	}
-
-	return (lcchild == lc);
-}
-
 static struct layout_cell *
 layout_cell_get_first_tiled(struct layout_cell *lc)
 {
@@ -397,54 +380,21 @@ layout_cell_is_last_tiled(struct layout_cell *lc)
 	return (lcchild == lc);
 }
 
-/* Is this a top cell? */
-static int
-layout_cell_is_top(struct layout_cell *root, struct layout_cell *lc)
-{
-	struct layout_cell	*next;
-
-	while (lc != root) {
-		next = lc->parent;
-		if (next == NULL)
-			return (0);
-		if (next->type == LAYOUT_TOPBOTTOM &&
-		    !layout_cell_is_first_tiled(lc))
-			return (0);
-		lc = next;
-	}
-	return (1);
-}
-
-/* Is this a bottom cell? */
-static int
-layout_cell_is_bottom(struct layout_cell *root, struct layout_cell *lc)
-{
-	struct layout_cell	*next;
-
-	while (lc != root) {
-		next = lc->parent;
-		if (next == NULL)
-			return (0);
-		if (next->type == LAYOUT_TOPBOTTOM &&
-		    !layout_cell_is_last_tiled(lc))
-			return (0);
-		lc = next;
-	}
-	return (1);
-}
-
 /*
  * Returns 1 if we need to add an extra line for the pane status line. This is
  * the case for the most upper or lower panes only.
  */
 int
-layout_add_horizontal_border(struct layout_cell *root, struct layout_cell *lc,
-    int status)
+layout_add_horizontal_border(__unused struct layout_cell *root,
+    __unused struct layout_cell *lc, __unused int status)
 {
-	if (status == PANE_STATUS_TOP)
-		return (layout_cell_is_top(root, lc));
-	if (status == PANE_STATUS_BOTTOM)
-		return (layout_cell_is_bottom(root, lc));
+	/*
+	 * A pane used to have no border of its own at the window edge, so a
+	 * pane at the top or bottom of the layout had to give up a row for its
+	 * status line. Every pane is now boxed on all four sides, so the status
+	 * is always drawn into a border row that already exists and no pane
+	 * ever needs to be made smaller for it.
+	 */
 	return (0);
 }
 
