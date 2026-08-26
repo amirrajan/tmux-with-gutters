@@ -270,16 +270,19 @@ fuzz_style_fuzzer_LDADD = $(LDADD) $(tmux_OBJECTS)
 endif
 
 # Install tmux.1 in the right format.
+# The man page is generated into the build directory, not the source tree: a
+# build outside the tree must not write into it, and an install that needs root
+# would otherwise leave a root owned file there for later builds to trip over.
 install-exec-hook:
 	if test x@MANFORMAT@ = xmdoc; then \
 		sed -e "s|@SYSCONFDIR@|$(sysconfdir)|g" $(srcdir)/tmux.1 \
-			>$(srcdir)/tmux.1.mdoc; \
+			>$(builddir)/tmux.1.mdoc; \
 	else \
 		sed -e "s|@SYSCONFDIR@|$(sysconfdir)|g" $(srcdir)/tmux.1| \
-			$(AWK) -f $(srcdir)/mdoc2man.awk >$(srcdir)/tmux.1.man; \
+			$(AWK) -f $(srcdir)/mdoc2man.awk >$(builddir)/tmux.1.man; \
 	fi
 	$(mkdir_p) $(DESTDIR)$(mandir)/man1
-	$(INSTALL_DATA) $(srcdir)/tmux.1.@MANFORMAT@ \
+	$(INSTALL_DATA) $(builddir)/tmux.1.@MANFORMAT@ \
 		$(DESTDIR)$(mandir)/man1/tmux.1
 
 # And uninstall it.

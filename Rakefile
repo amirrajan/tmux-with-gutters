@@ -4,13 +4,17 @@ require 'shellwords'
 
 ROOT       = File.expand_path(__dir__)
 PREFIX     = File.join(ROOT, 'build-output')
+# The test build is configured and compiled here, not in the source tree, so
+# that install.sh can configure a release build of its own: autotools refuses a
+# build outside a tree that is itself configured.
+BUILD      = File.join(PREFIX, 'build')
 TMUX_BIN   = File.join(PREFIX, 'bin', 'tmux')
 REGRESS    = File.join(ROOT, 'regress')
 # Minitest suites (tests/*-test.rb), run by `rake tests` rather than by the
 # shell driven regress suite (`rake regress`).
 TESTS      = File.join(ROOT, 'tests')
 LOGDIR     = File.join(REGRESS, 'logs')
-CONFIGURE_STAMP = File.join(ROOT, '.rake-configure-stamp')
+CONFIGURE_STAMP = File.join(BUILD, '.rake-configure-stamp')
 MAKE       = ENV['MAKE'] || (system('command -v gmake >/dev/null 2>&1') ? 'gmake' : 'make')
 JOBS       = ENV['JOBS'] || `getconf _NPROCESSORS_ONLN`.strip
 CONFIGURE_ARGS = (ENV['CONFIGURE_ARGS'] || '--enable-utf8proc').shellsplit
@@ -25,10 +29,12 @@ def sh!(*cmd, chdir: ROOT)
 end
 
 def clean
+  # PREFIX holds the build directory as well as the installed binary, so this
+  # removes both. The leftovers below are from older in-tree builds.
+  FileUtils.rm_rf([PREFIX, LOGDIR])
   if File.exist?(File.join(ROOT, 'Makefile'))
     system(MAKE, 'distclean', chdir: ROOT, out: File::NULL, err: File::NULL)
   end
-  FileUtils.rm_rf([PREFIX, LOGDIR])
   FileUtils.rm_f(Dir[File.join(ROOT, '*.o')] +
                  Dir[File.join(ROOT, 'compat', '*.o')] +
                  [File.join(ROOT, 'tmux'),
@@ -38,7 +44,7 @@ def clean
                   File.join(ROOT, 'config.status'),
                   File.join(ROOT, 'config.log'),
                   File.join(ROOT, 'config.h'),
-                  CONFIGURE_STAMP])
+                  File.join(ROOT, '.rake-configure-stamp')])
   puts 'cleaned'
 end
 
@@ -71,14 +77,28 @@ def build
     FileUtils.touch(configure)
   end
 
-  makefile = File.join(ROOT, 'Makefile')
+  # autotools refuses to configure outside a tree that is configured itself, so
+  # an in-tree build from before this moved out has to be undone once.
+  if File.exist?(File.join(ROOT, 'config.status'))
+    puts 'removing in-tree build'
+    system(MAKE, 'distclean', chdir: ROOT, out: File::NULL, err: File::NULL)
+    FileUtils.rm_f([File.join(ROOT, 'config.status'),
+                    File.join(ROOT, 'config.h'),
+                    File.join(ROOT, 'Makefile'),
+                    File.join(ROOT, 'tmux.1.mdoc'),
+                    File.join(ROOT, 'tmux.1.man')])
+  end
+
+  FileUtils.mkdir_p(BUILD)
+  makefile = File.join(BUILD, 'Makefile')
   if configure_stale?(configure, makefile)
-    sh! configure, "--prefix=#{PREFIX}", "CFLAGS=#{CFLAGS}", *CONFIGURE_ARGS
+    sh! configure, "--prefix=#{PREFIX}", "CFLAGS=#{CFLAGS}", *CONFIGURE_ARGS,
+        chdir: BUILD
     File.write(CONFIGURE_STAMP, configure_signature)
   end
 
-  sh! MAKE, "-j#{JOBS}"
-  sh! MAKE, 'install'
+  sh! MAKE, "-j#{JOBS}", chdir: BUILD
+  sh! MAKE, 'install', chdir: BUILD
 
   raise "missing installed binary: #{TMUX_BIN}" unless File.executable?(TMUX_BIN)
   puts "installed: #{TMUX_BIN}"

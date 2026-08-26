@@ -1,15 +1,20 @@
 #!/bin/sh
 #
-# Clean, build a release binary and install it.
+# Build a release binary in its own directory and install it.
 #
-# Everything the build produces is thrown away first, so this never reuses
-# objects from a debug or test build: the version here is a "next" version, and
-# configure turns debug on by default for those, which is not what should be
-# installed.
+# The build happens outside the source tree, in BUILD_DIR (release-build/ by
+# default), for two reasons: the version here is a "next" version, so configure
+# turns debug on by default, which is right for `rake tests` and wrong for
+# something to actually use, and the install step may need sudo, which would
+# otherwise leave root owned objects and generated man pages in the tree for
+# every later unprivileged build to trip over.
+#
+# The directory is wiped first, so nothing is ever reused from an older build.
 #
 # Usage:
 #   sh ./install.sh                     # /usr/local, the autotools default
 #   PREFIX=/usr sh ./install.sh         # somewhere else
+#   BUILD_DIR=/tmp/tmux sh ./install.sh # build somewhere else
 #   JOBS=4 sh ./install.sh              # fewer compile jobs
 #   CONFIGURE_ARGS="--disable-utf8proc" sh ./install.sh
 #
@@ -21,6 +26,7 @@ ROOT=$(cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 
 PREFIX=${PREFIX:-/usr/local}
+BUILD_DIR=${BUILD_DIR:-$ROOT/release-build}
 CFLAGS=${CFLAGS:--O2}
 CONFIGURE_ARGS=${CONFIGURE_ARGS:---disable-debug --enable-utf8proc}
 MAKE=${MAKE:-$(command -v gmake >/dev/null 2>&1 && echo gmake || echo make)}
@@ -49,21 +55,24 @@ as_root() {
 	fi
 }
 
-say "cleaning"
-if [ -f Makefile ]; then
-	$MAKE distclean >/dev/null 2>&1 || true
+if [ "$BUILD_DIR" = "$ROOT" ]; then
+	printf 'BUILD_DIR must not be the source tree: %s\n' "$ROOT" >&2
+	exit 1
 fi
-rm -f ./*.o compat/*.o tmux tmux.1.mdoc tmux.1.man
-rm -f config.h config.log config.status .rake-configure-stamp
 
 if [ ! -f configure ]; then
 	say "generating configure"
 	sh autogen.sh
 fi
 
+say "clearing $BUILD_DIR"
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+
 say "configuring with prefix $PREFIX"
 # shellcheck disable=SC2086 # CONFIGURE_ARGS is a list of arguments on purpose.
-./configure --prefix="$PREFIX" CFLAGS="$CFLAGS" $CONFIGURE_ARGS
+"$ROOT/configure" --prefix="$PREFIX" CFLAGS="$CFLAGS" $CONFIGURE_ARGS
 
 say "building with $MAKE -j$JOBS"
 $MAKE "-j$JOBS"

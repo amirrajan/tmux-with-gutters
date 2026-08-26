@@ -26,6 +26,7 @@ tags
 tmux
 tmux.1.*
 /build-output/
+/release-build/
 /.rake-configure-stamp
 *.log
 /vendor/bundle/
