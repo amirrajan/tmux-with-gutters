@@ -518,19 +518,24 @@ class PaneBorderEdgesTest < Minitest::Test
     @scene.display_panes
     @scene.capture
 
+    # The overlay pane covers the whole window and is boxed like any other
+    # pane, so the ring of cells on the window edge is its own box rather than
+    # the outer sides of the four panes: the same cells, drawn as one box. The
+    # overlay draws the miniature inside that box, which is where the four
+    # panes' facing borders and all of their content land.
     assert_scene @scene, <<~WANT
-      ┌──────────┐┌──────────┐
+      ┌──────────────────────┐
       │......10x4││......10x4│
       │..........││..........│
       │....0.....││....1.....│
       │..........││..........│
-      └──────────┘└──────────┘
-      ┌──────────┐┌──────────┐
+      │──────────┘└──────────│
+      │──────────┐┌──────────│
       │......10x4││......10x4│
       │..........││..........│
       │....2.....││....3.....│
       │..........││..........│
-      └──────────┘└──────────┘
+      └──────────────────────┘
     WANT
 
     assert @scene.alive?, 'inner server died'

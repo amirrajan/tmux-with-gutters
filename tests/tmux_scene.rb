@@ -426,9 +426,16 @@ module SceneAssertions
   # Assert that two scenes put their borders in exactly the same cells. Anything
   # that is not a border glyph is blanked out first, so pane content and
   # overlays are ignored and only the border skeleton is compared.
+  #
+  # The cells on the window edge are compared by presence only. A pane that
+  # covers the whole window, as the display-panes overlay pane does, is boxed
+  # like any other pane, and that box is its own border: it occupies the same
+  # ring of cells as the outer sides of the panes it hides, but it is one
+  # continuous box rather than one box per pane, so the glyphs there differ
+  # while the cells do not.
   def assert_same_borders(before, after, message = 'borders moved')
-    want = border_skeleton(before)
-    got = border_skeleton(after)
+    want = border_skeleton(before, edge_presence: true)
+    got = border_skeleton(after, edge_presence: true)
     return if want == got
 
     report = [
@@ -445,9 +452,23 @@ module SceneAssertions
   # shape of the scene. Trailing spaces are dropped because capture-pane
   # already trims them, so a row whose last border is followed by pane content
   # in one scene and by nothing in the other still compares equal.
-  def border_skeleton(text)
-    text.split("\n", -1).map { |line|
-      line.gsub(/./) { |c| BORDER_GLYPHS.match?(c) ? c : ' ' }.rstrip
+  #
+  # With edge_presence, every border glyph on the outermost row or column is
+  # reduced to a single stand in character, so those cells compare by presence
+  # rather than by shape.
+  def border_skeleton(text, edge_presence: false)
+    lines = text.split("\n", -1)
+    # A capture ends in a newline, so the last element is usually empty; the
+    # window edge is the last row that has anything in it.
+    last_row = lines.rindex { |line| !line.empty? } || lines.size - 1
+
+    lines.each_with_index.map { |line, row|
+      last_col = line.length - 1
+      line.chars.each_with_index.map { |c, col|
+        next ' ' unless BORDER_GLYPHS.match?(c)
+        edge = row.zero? || row == last_row || col.zero? || col == last_col
+        edge_presence && edge ? 'x' : c
+      }.join.rstrip
     }.join("\n")
   end
 

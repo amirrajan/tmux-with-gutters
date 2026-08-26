@@ -32,6 +32,8 @@ static void		 window_panes_resize(struct window_mode_entry *, u_int,
 static void		 window_panes_key(struct window_mode_entry *,
 			     struct client *, struct session *,
 			     struct winlink *, key_code, struct mouse_event *);
+static int		 window_panes_map_x(u_int, u_int, u_int);
+static int		 window_panes_map_y(u_int, u_int, u_int);
 
 const struct window_mode window_panes_mode = {
 	.name = "panes-mode",
@@ -181,17 +183,14 @@ window_panes_get_geometry(struct window_pane *wp, struct layout_cell *root,
 	if (lc == NULL || osx == 0 || osy == 0 || dsx == 0 || dsy == 0)
 		return (0);
 
-	if (osx <= dsx && osy <= dsy) {
-		x = lc->g.xoff;
-		y = lc->g.yoff;
-		x2 = x + lc->g.sx;
-		y2 = y + lc->g.sy;
-	} else {
-		x = (u_int)lc->g.xoff * dsx / osx;
-		y = (u_int)lc->g.yoff * dsy / osy;
-		x2 = ((u_int)lc->g.xoff + lc->g.sx) * dsx / osx;
-		y2 = ((u_int)lc->g.yoff + lc->g.sy) * dsy / osy;
-	}
+	x = window_panes_map_x(lc->g.xoff, osx, dsx);
+	y = window_panes_map_y(lc->g.yoff, osy, dsy);
+	x2 = window_panes_map_x(lc->g.xoff + lc->g.sx, osx, dsx);
+	y2 = window_panes_map_y(lc->g.yoff + lc->g.sy, osy, dsy);
+
+	log_debug("%s: pane %%%u cell %ux%u@%d,%d -> %ux%u screen %u,%u-%u,%u",
+	    __func__, wp->id, lc->g.sx, lc->g.sy, lc->g.xoff, lc->g.yoff, dsx,
+	    dsy, x, y, x2, y2);
 
 	if (x >= dsx || y >= dsy)
 		return (0);
@@ -237,9 +236,16 @@ window_panes_get_border_cell(struct window_panes_modedata *data,
 	format_free(ft);
 }
 
+/*
+ * Map a layout coordinate into the mode's screen. Layout coordinates are
+ * window coordinates and the layout is inset by the border at the window edge,
+ * whereas the mode's screen starts inside its own pane's border, so the inset
+ * comes off first.
+ */
 static int
 window_panes_map_x(u_int x, u_int osx, u_int dsx)
 {
+	x = (x > LAYOUT_BORDER) ? x - LAYOUT_BORDER : 0;
 	if (osx <= dsx)
 		return (x);
 	return (x * dsx / osx);
@@ -248,23 +254,10 @@ window_panes_map_x(u_int x, u_int osx, u_int dsx)
 static int
 window_panes_map_y(u_int y, u_int osy, u_int dsy)
 {
+	y = (y > LAYOUT_BORDER) ? y - LAYOUT_BORDER : 0;
 	if (osy <= dsy)
 		return (y);
 	return (y * dsy / osy);
-}
-
-static struct layout_cell *
-window_panes_next_tiled_cell(struct layout_cell *lc)
-{
-	struct layout_cell	*next;
-
-	next = TAILQ_NEXT(lc, entry);
-	while (next != NULL) {
-		if (~next->flags & LAYOUT_CELL_FLOATING)
-			return (next);
-		next = TAILQ_NEXT(next, entry);
-	}
-	return (NULL);
 }
 
 static void
@@ -325,41 +318,40 @@ window_panes_mark_hline(u_char *map, u_int dsx, u_int dsy, int x, int x2, int y)
 	}
 }
 
+/*
+ * Mark the borders of every pane cell. Each pane is boxed on all four sides,
+ * so two neighbours show two adjacent border cells rather than one shared one,
+ * and there are no T junctions or crossings to join up.
+ */
 static void
 window_panes_mark_borders_cell(u_char *map, struct layout_cell *lc, u_int osx,
     u_int osy, u_int dsx, u_int dsy)
 {
-	struct layout_cell	*lcchild, *lcnext;
+	struct layout_cell	*lcchild;
 	int			 x, y, x2, y2;
 
-	if (lc->type == LAYOUT_WINDOWPANE)
+	if (lc->flags & LAYOUT_CELL_FLOATING)
 		return;
-
-	TAILQ_FOREACH(lcchild, &lc->cells, entry) {
-		window_panes_mark_borders_cell(map, lcchild, osx, osy, dsx,
-		    dsy);
-		if (lcchild->flags & LAYOUT_CELL_FLOATING)
-			continue;
-		lcnext = window_panes_next_tiled_cell(lcchild);
-		if (lcnext == NULL)
-			continue;
-
-		if (lc->type == LAYOUT_LEFTRIGHT) {
-			x = window_panes_map_x(lcchild->g.xoff + lcchild->g.sx,
-			    osx, dsx);
-			y = window_panes_map_y(lc->g.yoff, osy, dsy);
-			y2 = window_panes_map_y(lc->g.yoff + lc->g.sy, osy,
-			    dsy);
-			window_panes_mark_vline(map, dsx, dsy, x, y, y2);
-		} else {
-			x = window_panes_map_x(lc->g.xoff, osx, dsx);
-			x2 = window_panes_map_x(lc->g.xoff + lc->g.sx, osx,
-			    dsx);
-			y = window_panes_map_y(lcchild->g.yoff + lcchild->g.sy,
-			    osy, dsy);
-			window_panes_mark_hline(map, dsx, dsy, x, x2, y);
-		}
+	if (lc->type != LAYOUT_WINDOWPANE) {
+		TAILQ_FOREACH(lcchild, &lc->cells, entry)
+			window_panes_mark_borders_cell(map, lcchild, osx, osy,
+			    dsx, dsy);
+		return;
 	}
+
+	/* A pane's border is drawn in the cells just outside its own cell. */
+	x = window_panes_map_x(lc->g.xoff, osx, dsx) - LAYOUT_BORDER;
+	y = window_panes_map_y(lc->g.yoff, osy, dsy) - LAYOUT_BORDER;
+	x2 = window_panes_map_x(lc->g.xoff + lc->g.sx, osx, dsx);
+	y2 = window_panes_map_y(lc->g.yoff + lc->g.sy, osy, dsy);
+
+	log_debug("%s: cell %ux%u@%d,%d -> box %d,%d-%d,%d in %ux%u", __func__,
+	    lc->g.sx, lc->g.sy, lc->g.xoff, lc->g.yoff, x, y, x2, y2, dsx, dsy);
+
+	window_panes_mark_hline(map, dsx, dsy, x, x2 + 1, y);
+	window_panes_mark_hline(map, dsx, dsy, x, x2 + 1, y2);
+	window_panes_mark_vline(map, dsx, dsy, x, y, y2 + 1);
+	window_panes_mark_vline(map, dsx, dsy, x2, y, y2 + 1);
 }
 
 static void
@@ -491,89 +483,6 @@ window_panes_border_cell_type(u_char mask)
 	return (CELL_NONE);
 }
 
-static int
-window_panes_border_has_horizontal(u_char mask)
-{
-	return ((mask & (WINDOW_PANES_BORDER_L|WINDOW_PANES_BORDER_R)) != 0);
-}
-
-static int
-window_panes_border_has_vertical(u_char mask)
-{
-	return ((mask & (WINDOW_PANES_BORDER_U|WINDOW_PANES_BORDER_D)) != 0);
-}
-
-static void
-window_panes_mark_border_joins_cell(u_char *map, struct layout_cell *lc,
-    u_int osx, u_int osy, u_int dsx, u_int dsy)
-{
-	struct layout_cell	*lcchild, *lcnext;
-	int			 x, y, x2, y2;
-
-	if (lc->type == LAYOUT_WINDOWPANE)
-		return;
-
-	TAILQ_FOREACH(lcchild, &lc->cells, entry) {
-		window_panes_mark_border_joins_cell(map, lcchild, osx, osy,
-		    dsx, dsy);
-		if (lcchild->flags & LAYOUT_CELL_FLOATING)
-			continue;
-		lcnext = window_panes_next_tiled_cell(lcchild);
-		if (lcnext == NULL)
-			continue;
-
-		if (lc->type == LAYOUT_LEFTRIGHT) {
-			x = window_panes_map_x(lcchild->g.xoff + lcchild->g.sx,
-			    osx, dsx);
-			y = window_panes_map_y(lc->g.yoff, osy, dsy);
-			y2 = window_panes_map_y(lc->g.yoff + lc->g.sy, osy,
-			    dsy);
-			if (x < 0 || (u_int)x >= dsx)
-				continue;
-			if (y > 0 &&
-			    window_panes_border_has_horizontal(
-			    map[(y - 1) * dsx + x])) {
-				window_panes_mark_border(map, dsx, dsy, x,
-				    y - 1, WINDOW_PANES_BORDER_D);
-				window_panes_mark_border(map, dsx, dsy, x, y,
-				    WINDOW_PANES_BORDER_U);
-			}
-			if ((u_int)y2 < dsy &&
-			    window_panes_border_has_horizontal(
-			    map[y2 * dsx + x])) {
-				window_panes_mark_border(map, dsx, dsy, x, y2,
-				    WINDOW_PANES_BORDER_U);
-				window_panes_mark_border(map, dsx, dsy, x,
-				    y2 - 1, WINDOW_PANES_BORDER_D);
-			}
-		} else {
-			x = window_panes_map_x(lc->g.xoff, osx, dsx);
-			x2 = window_panes_map_x(lc->g.xoff + lc->g.sx, osx,
-			    dsx);
-			y = window_panes_map_y(lcchild->g.yoff + lcchild->g.sy,
-			    osy, dsy);
-			if (y < 0 || (u_int)y >= dsy)
-				continue;
-			if (x > 0 &&
-			    window_panes_border_has_vertical(
-			    map[y * dsx + x - 1])) {
-				window_panes_mark_border(map, dsx, dsy, x - 1,
-				    y, WINDOW_PANES_BORDER_R);
-				window_panes_mark_border(map, dsx, dsy, x, y,
-				    WINDOW_PANES_BORDER_L);
-			}
-			if ((u_int)x2 < dsx &&
-			    window_panes_border_has_vertical(
-			    map[y * dsx + x2])) {
-				window_panes_mark_border(map, dsx, dsy, x2, y,
-				    WINDOW_PANES_BORDER_L);
-				window_panes_mark_border(map, dsx, dsy, x2 - 1,
-				    y, WINDOW_PANES_BORDER_R);
-			}
-		}
-	}
-}
-
 static void
 window_panes_draw_borders(struct screen_write_ctx *ctx, struct window *w,
     struct layout_cell *lc, const struct grid_cell *gc, u_int osx, u_int osy,
@@ -591,7 +500,6 @@ window_panes_draw_borders(struct screen_write_ctx *ctx, struct window *w,
 	window_panes_mark_borders_cell(map, lc, osx, osy, dsx, dsy);
 	window_panes_mark_pane_status_borders(map, w, lc, osx, osy, dsx,
 	    dsy);
-	window_panes_mark_border_joins_cell(map, lc, osx, osy, dsx, dsy);
 
 	for (yy = 0; yy < dsy; yy++) {
 		for (xx = 0; xx < dsx; xx++) {
