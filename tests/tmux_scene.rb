@@ -574,6 +574,49 @@ module SceneAssertions
     out
   end
 
+  # Reduce an escaped capture to one character per cell: 'R' where the reverse
+  # attribute (SGR 7) was in force when the cell was written, '.' where it was
+  # not. This is how the marked pane is drawn, by redraw_draw_border_span, and
+  # it is the one border attribute that no background comparison can see.
+  def reverse_map(text, on: 'R', off: '.')
+    reverse = false
+    out = +''
+
+    text.scan(/\e\[([0-9;]*)m|([^\e])/) do |sgr, char|
+      if sgr
+        # An empty parameter list is SGR 0, which clears every attribute.
+        params = sgr.empty? ? ['0'] : sgr.split(';')
+        params.each do |param|
+          case param.to_i
+          when 7 then reverse = true
+          when 0, 27 then reverse = false
+          end
+        end
+      elsif char == "\n"
+        out << char
+      else
+        out << (reverse ? on : off)
+      end
+    end
+
+    out
+  end
+
+  # Assert that the reverse attribute is in the same cells in both captures,
+  # which is what the marked pane's border has to be for the display-panes
+  # overlay and the real borders to agree.
+  def assert_same_reverse(before, after, message = 'reverse attribute moved')
+    want = reverse_map(before)
+    got = reverse_map(after)
+    return if want == got
+
+    flunk [
+      message, '',
+      'reverse cells in the first capture:', boxed(want), '',
+      'reverse cells in the second capture:', boxed(got)
+    ].join("\n")
+  end
+
   # Assert only that the panes are where the picture says, without comparing
   # the drawn scene. For cases where the picture cannot be compared directly,
   # such as an overlay drawn on top of the panes.
