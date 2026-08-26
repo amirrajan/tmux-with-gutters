@@ -1657,7 +1657,7 @@ layout_get_tiled_cell(struct cmdq_item *item, struct args *args,
 {
 	struct layout_cell	*lc;
 	enum layout_type	 type = LAYOUT_TOPBOTTOM;
-	u_int			 curval;
+	u_int			 curval, sx, sy;
 	int			 size = -1;
 	char			*error = NULL;
 
@@ -1670,17 +1670,29 @@ layout_get_tiled_cell(struct cmdq_item *item, struct args *args,
 		type = LAYOUT_LEFTRIGHT;
 
 	if (args_has(args, 'l') || args_has(args, 'p')) {
-		if (flags & SPAWN_FULLSIZE) {
-			if (type == LAYOUT_TOPBOTTOM)
-				curval = w->sy;
-			else
-				curval = w->sx;
-		} else {
-			if (type == LAYOUT_TOPBOTTOM)
-				curval = wp->sy;
-			else
-				curval = wp->sx;
+		/*
+		 * A size given as a percentage is a share of the space the
+		 * split has to divide, which is the cell being split less the
+		 * LAYOUT_SEPARATOR between the two panes it becomes: a full
+		 * size split divides the layout, which is the window less the
+		 * border at its edge, and any other split divides the pane.
+		 * Without this -l 50% asks for half of a larger number than
+		 * there is to give out and does not halve anything.
+		 */
+		if (flags & SPAWN_FULLSIZE)
+			layout_window_area(w, &sx, &sy);
+		else {
+			sx = wp->sx;
+			sy = wp->sy;
 		}
+		if (type == LAYOUT_TOPBOTTOM)
+			curval = sy;
+		else
+			curval = sx;
+		if (curval > LAYOUT_SEPARATOR)
+			curval -= LAYOUT_SEPARATOR;
+		else
+			curval = 0;
 	}
 
 	if (args_has(args, 'l')) {
